@@ -1,4 +1,5 @@
 'use strict';
+const APP_VERSION = '10';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -12,7 +13,7 @@ function load(key, def) {
 }
 const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
   autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.5-flash-lite',
-  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5 });
+  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5, micMode: 'record' });
 if (!S.voices) S.voices = {};
 // Migrar voces elegidas con los nombres antiguos
 [['lars', 'mattias'], ['mike', 'alvaro'], ['erik', 'paul']].forEach(([o, n]) => { if (S.voices[o] && !S.voices[n]) S.voices[n] = S.voices[o]; delete S.voices[o]; });
@@ -203,15 +204,23 @@ function listen({ onInterim, onFinal, button, lang = 'en-US' }) {
     };
     rec.onerror = e => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Permite el uso del micrófono en los ajustes del navegador.'); ses.fatal = true; ses.stopped = true; }
-      else if (e.error === 'network') { toast('El reconocimiento de voz necesita internet.'); ses.fatal = true; ses.stopped = true; }
-      else if (e.error === 'audio-capture') { toast('No se encontró micrófono. Revisa el audífono o el permiso.'); ses.fatal = true; ses.stopped = true; }
+      else if (e.error === 'network' || e.error === 'audio-capture') {
+        ses.errs = (ses.errs || 0) + 1;
+        if (ses.errs >= 4) { toast(e.error === 'network' ? 'El reconocimiento de voz necesita internet.' : 'No se pudo usar el micrófono. Revisa el audífono o el permiso.'); ses.fatal = true; ses.stopped = true; }
+      }
       // 'no-speech' y 'aborted' no cortan la sesión: se vuelve a escuchar
     };
-    rec.onend = () => {
-      if (!ses.stopped) { setTimeout(() => { if (!ses.stopped) { try { startRec(); } catch { finalize(); } } else finalize(); }, 120); }
-      else finalize();
-    };
-    try { rec.start(); } catch { finalize(); }
+    rec.onend = () => { if (!ses.stopped) restart(0); else finalize(); };
+    try { rec.start(); } catch { restart(1); }
+  }
+  // Algunos Android rechazan reiniciar de inmediato: se reintenta con pausas antes de rendirse
+  function restart(tries) {
+    if (ses.stopped) return finalize();
+    if (tries > 8) return finalize();
+    setTimeout(() => {
+      if (ses.stopped) return finalize();
+      try { startRec(); } catch { restart(tries + 1); }
+    }, 150 + tries * 250);
   }
   function finish() {
     if (ses.stopped && !ses.rec) return finalize();
@@ -241,6 +250,92 @@ function listen({ onInterim, onFinal, button, lang = 'en-US' }) {
   if (button) button.classList.add('listening');
   toast(S.silence > 0 ? `🎙 Escuchando… Toca 🎙 otra vez cuando termines (o espera ${S.silence} s en silencio).` : '🎙 Escuchando… Toca 🎙 otra vez cuando termines.', 3500);
   startRec();
+}
+
+/* ============ Grabación de voz sin cortes (se transcribe con Gemini) ============ */
+let recording = null;
+function floatTo16kWav(chunks, inRate) {
+  const len = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(len);
+  let o = 0; chunks.forEach(c => { all.set(c, o); o += c.length; });
+  const outRate = 16000, ratio = inRate / outRate, n = Math.floor(len / ratio), pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const st = Math.floor(i * ratio), en = Math.min(len, Math.floor((i + 1) * ratio)); let sum = 0;
+    for (let j = st; j < en; j++) sum += all[j];
+    const v = Math.max(-1, Math.min(1, sum / Math.max(1, en - st))); pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+  const w = (off, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(off + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, outRate, true);
+  dv.setUint32(28, outRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+const blobToB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); });
+async function transcribeAudio(b64, lang) {
+  const spanish = lang.startsWith('es');
+  const r = await gemini('You are an accurate speech-to-text engine.', [{ role: 'user', parts: [
+    { inlineData: { mimeType: 'audio/wav', data: b64 } },
+    { text: `Transcribe exactly what the speaker says. ${spanish ? 'The speaker speaks Spanish (Chile), maybe with some English words.' : 'The speaker is a Chilean learner speaking English (there may be a few Spanish words; keep them).'} Write the words as actually spoken, keeping any grammar mistakes: do NOT correct, improve or complete the sentences. Ignore background machine noise. If nothing intelligible is said, return an empty string. Respond ONLY with JSON: {"text":"..."}` }
+  ] }], 0);
+  return (r.text || '').trim();
+}
+// Graba hasta que tocas 🎙 otra vez (o hasta el silencio elegido en Ajustes) y luego transcribe
+async function recordVoice({ button, lang = 'en-US', input, onText }) {
+  if (recording) { recording.finish(); return; }
+  if (!S.apiKey || !navigator.mediaDevices?.getUserMedia) {
+    if (!S.apiKey) toast('La grabación sin cortes necesita la clave de Gemini. Uso el micrófono del teléfono.');
+    return listen({ button, lang, onInterim: t => { input.value = t; }, onFinal: onText });
+  }
+  speechSynthesis.cancel(); stopTalking();
+  let stream, ctx;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.resume();
+  } catch (e) { toast('Permite el uso del micrófono en los ajustes del navegador.'); return; }
+  const source = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks = [], started = Date.now();
+  let lastLoud = Date.now(), spoke = false, finished = false;
+  const recent = [];                                                      // niveles recientes para estimar el ruido de fondo
+  proc.onaudioprocess = e => {
+    const d = e.inputBuffer.getChannelData(0); chunks.push(new Float32Array(d));
+    let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * d[i];
+    const rms = Math.sqrt(sum / (d.length / 4));
+    recent.push(rms); if (recent.length > 40) recent.shift();            // ~4 s
+    const noise = Math.min(0.03, Math.min(...recent));                   // el mínimo reciente ≈ ruido de fondo
+    const thr = Math.max(0.012, noise * 3);
+    if (rms > thr) { lastLoud = Date.now(); spoke = true; }
+    button.style.setProperty('--lvl', Math.min(1, rms * 12).toFixed(2));
+  };
+  source.connect(proc); proc.connect(ctx.destination);
+  button.classList.add('listening');
+  input.value = ''; input.placeholder = '🎙 Grabando… toca 🎙 otra vez para terminar';
+  const timer = setInterval(() => {
+    const now = Date.now();
+    button.setAttribute('data-secs', Math.floor((now - started) / 1000));
+    if (S.silence > 0 && spoke && now - lastLoud > S.silence * 1000) finish();
+    else if (!spoke && now - started > 20000) finish();
+    else if (now - started > 180000) finish();                            // máximo 3 minutos
+  }, 250);
+  async function finish() {
+    if (finished) return; finished = true; recording = null; clearInterval(timer);
+    try { proc.disconnect(); source.disconnect(); } catch {}
+    stream.getTracks().forEach(t => t.stop());
+    const rate = ctx.sampleRate; try { await ctx.close(); } catch {}
+    button.classList.remove('listening'); button.removeAttribute('data-secs'); button.style.removeProperty('--lvl');
+    if (Date.now() - started < 800) { input.placeholder = 'Habla o escribe…'; toast('Grabación muy corta. Toca 🎙, habla y vuelve a tocar 🎙 al terminar.'); return; }
+    input.placeholder = '✍️ Transcribiendo tu voz…'; button.disabled = true; input.disabled = true;
+    try {
+      const b64 = await blobToB64(floatTo16kWav(chunks, rate));
+      const text = await transcribeAudio(b64, lang);
+      if (!text) toast('No logré entender la grabación. Intenta de nuevo.');
+      else onText(text);
+    } catch (e) { toast(aiErrorMsg(e), 4000); }
+    finally { button.disabled = false; input.disabled = false; input.placeholder = 'Habla o escribe…'; }
+  }
+  recording = { finish };
+  toast(S.silence > 0 ? `🎙 Grabando sin límite de pausas. Toca 🎙 al terminar (o ${S.silence} s en silencio).` : '🎙 Grabando sin límite de pausas. Toca 🎙 al terminar.', 3500);
 }
 
 /* ============ IA (Google Gemini, plan gratuito) ============ */
@@ -370,7 +465,7 @@ function addNote({ original, corrected, explanation, type, sentence, source }) {
 }
 
 /* ============ Conversación ============ */
-const talk = { history: [], active: false, busy: false };
+const talk = { history: [], active: false, busy: false, turns: [], started: 0 };
 const LEVEL_NOTES = {
   A1: 'The learner is a beginner. Use very simple, common words, very short sentences (maximum 8 words), mostly present tense. Ask simple yes/no or either/or questions.',
   A2: 'Use simple vocabulary and short sentences. Speak slowly and clearly. Avoid idioms.',
@@ -424,6 +519,8 @@ RULES FOR YOUR REPLY:
 RULES FOR FEEDBACK about the learner's LAST message:
 - The learner's text comes from speech recognition: ignore punctuation, capitalization and obvious transcription glitches. Focus on grammar, word choice, missing words, word order and phrases that sound unnatural.
 - List only real mistakes, maximum 4, the most important first. If the message is correct, return an empty corrections list.
+- NEVER put a fragment in "corrections" if it is already correct. Do not "correct" punctuation, capitalization, contractions (I'm / I am) or correct alternatives. Better or more natural ways of saying something go ONLY in "natural", never in "corrections".
+- "original" must be the SHORTEST wrong fragment exactly as the learner said it (usually 1 to 5 words), never the whole sentence, and "corrected" must be different from "original".
 - Feedback level: ${STRICTNESS[S.level]}
 - Explanations in simple Spanish (Chile), maximum 20 words each.
 - If the learner writes in Spanish or mixes Spanish, put the English version in "natural" and in praise_es encourage them to say it in English.
@@ -468,20 +565,52 @@ function addAIMsg(reply, replyEs) {
   div.querySelector('[data-a=es]').onclick = () => { const e = div.querySelector('.es'); e.hidden = !e.hidden; if (!e.hidden && div === $('#chat').lastElementChild) scrollChatToEnd(); };
   if (S.autoSpeak) speak(reply, S.rate, role, av);
 }
-function addFeedback(r, said) {
-  const cs = Array.isArray(r.corrections) ? r.corrections : [];
-  const perfect = !cs.length;
-  let html = `<span class="score">${Number(r.score) || 0}/10</span><strong>${perfect ? 'Bien dicho' : 'Correcciones'}</strong>`;
-  if (r.praise_es) html += `<div>${esc(r.praise_es)}</div>`;
+// Contracciones: "I'm" y "I am" son igual de correctas
+const CONTRACTIONS = { "i'm": 'i am', "you're": 'you are', "it's": 'it is', "don't": 'do not', "doesn't": 'does not', "didn't": 'did not',
+  "can't": 'cannot', "won't": 'will not', "isn't": 'is not', "aren't": 'are not', "we're": 'we are', "they're": 'they are', "that's": 'that is',
+  "there's": 'there is', "i'll": 'i will', "we'll": 'we will', "i've": 'i have', "wasn't": 'was not', "weren't": 'were not', "let's": 'let us',
+  "what's": 'what is', "haven't": 'have not', "hasn't": 'has not', "he's": 'he is', "she's": 'she is', "couldn't": 'could not', "shouldn't": 'should not', "wouldn't": 'would not' };
+function normFix(t) {
+  return String(t || '').toLowerCase().replace(/[’‘`]/g, "'").split(/\s+/).map(w => CONTRACTIONS[w.replace(/[^a-z']/g, '')] || w)
+    .join(' ').replace(/cannot/g, 'can not').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// Solo se aceptan correcciones que de verdad cambian algo
+function realCorrections(r) {
+  return (Array.isArray(r.corrections) ? r.corrections : []).filter(c => c && c.original && c.corrected && normFix(c.original) !== normFix(c.corrected));
+}
+// Tu frase con solo los fragmentos equivocados tachados
+function markErrors(said, cs) {
+  const ranges = [];
   cs.forEach(c => {
-    html += `<div class="fix"><span class="from">${esc(c.original)}</span> → <span class="to">${esc(c.corrected)}</span><span class="why">${esc(c.explanation_es)}</span></div>`;
-    addNote({ original: c.original, corrected: c.corrected, explanation: c.explanation_es, type: c.type, sentence: r.natural, source: 'Conversación' });
+    const i = said.toLowerCase().indexOf(String(c.original).toLowerCase().trim());
+    if (i >= 0) ranges.push([i, i + String(c.original).trim().length]);
   });
-  if (r.natural && r.natural.trim().toLowerCase().replace(/[^a-z ]/g, '') !== said.trim().toLowerCase().replace(/[^a-z ]/g, '')) {
-    html += `<div class="fix">Más natural: <span class="natural">${esc(r.natural)}</span> <button class="btn ghost small" data-a="nat">🔊</button></div>`;
+  ranges.sort((x, y) => x[0] - y[0]);
+  let out = '', pos = 0;
+  ranges.forEach(([st, en]) => { if (st < pos) return; out += esc(said.slice(pos, st)) + `<span class="err">${esc(said.slice(st, en))}</span>`; pos = en; });
+  return out + esc(said.slice(pos));
+}
+function addFeedback(r, said) {
+  const cs = realCorrections(r);
+  const perfect = !cs.length;
+  let html = `<span class="score">${Number(r.score) || 0}/10</span><strong>${perfect ? '✓ ¡Correcto!' : 'Correcciones'}</strong>`;
+  if (r.praise_es) html += `<div>${esc(r.praise_es)}</div>`;
+  if (!perfect) {
+    const wholeWrong = cs.length === 1 && normFix(cs[0].original) === normFix(said);
+    if (!wholeWrong) html += `<div class="said">Tu frase: ${markErrors(said, cs)}</div>`;
+    cs.forEach(c => {
+      html += wholeWrong
+        ? `<div class="fix">Mejor dicho: <span class="to">${esc(c.corrected)}</span><span class="why">${esc(c.explanation_es)}</span></div>`
+        : `<div class="fix"><span class="from">${esc(c.original)}</span> → <span class="to">${esc(c.corrected)}</span><span class="why">${esc(c.explanation_es)}</span></div>`;
+      addNote({ original: c.original, corrected: c.corrected, explanation: c.explanation_es, type: c.type, sentence: r.natural, source: 'Conversación' });
+    });
   }
-  const div = chatAdd(html, 'feedback' + (perfect ? '' : ' has-errors'));
+  if (r.natural && normFix(r.natural) !== normFix(said)) {
+    html += `<div class="fix">${perfect ? 'Otra forma de decirlo' : 'Más natural'}: <span class="natural">${esc(r.natural)}</span> <button class="btn ghost small" data-a="nat">🔊</button></div>`;
+  }
+  const div = chatAdd(html, 'feedback' + (perfect ? ' is-correct' : ' has-errors'));
   const nb = div.querySelector('[data-a=nat]'); if (nb) nb.onclick = () => speak(r.natural, S.rate, 'narrator');
+  return { perfect, cs };
 }
 
 async function talkCall(userText) {
@@ -492,7 +621,10 @@ async function talkCall(userText) {
   try {
     const r = await gemini(talkSystem(), talk.history);
     typing.remove();
-    if (userText !== '[START]') { addFeedback(r, userText); bump('talk'); }
+    if (userText !== '[START]') {
+      const fb = addFeedback(r, userText); bump('talk');
+      talk.turns.push({ said: userText, score: Number(r.score) || 0, perfect: fb.perfect, cs: fb.cs });
+    }
     addAIMsg(r.reply || '…', r.reply_es || '');
     talk.history.push({ role: 'model', parts: [{ text: r.reply || '' }] });
     activity();
@@ -506,7 +638,7 @@ async function talkCall(userText) {
 
 $('#btnStartTalk').addEventListener('click', async () => {
   if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini.'); show('settings'); return; }
-  talk.history = []; $('#chat').innerHTML = '';
+  talk.history = []; talk.turns = []; talk.started = Date.now(); $('#chat').innerHTML = '';
   $('#talkSetup').hidden = true; $('#composer').hidden = false;
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
   const pr = $('#persona').value;
@@ -514,10 +646,45 @@ $('#btnStartTalk').addEventListener('click', async () => {
   const ok = await talkCall('[START]');
   if (!ok) { $('#talkSetup').hidden = false; $('#composer').hidden = true; }
 });
-$('#btnNewTalk').addEventListener('click', () => {
-  speechSynthesis.cancel(); $('#chat').innerHTML = ''; talk.history = [];
-  $('#talkSetup').hidden = false; $('#composer').hidden = true;
-});
+function resetTalk() {
+  speechSynthesis.cancel(); stopTalking(); $('#chat').innerHTML = ''; talk.history = []; talk.turns = [];
+  $('#talkSetup').hidden = false; $('#composer').hidden = true; $('#main').scrollTop = 0;
+}
+// Resumen al terminar: % de frases correctas, nota promedio y errores de la sesión
+function showTalkSummary() {
+  speechSynthesis.cancel(); stopTalking();
+  if (recording) recording.finish();
+  const t = talk.turns || [];
+  if (!t.length) { resetTalk(); return; }
+  const ok = t.filter(x => x.perfect).length, pct = Math.round(ok / t.length * 100);
+  const avg = (t.reduce((a, x) => a + x.score, 0) / t.length).toFixed(1);
+  const mins = Math.max(1, Math.round((Date.now() - (talk.started || Date.now())) / 60000));
+  const errs = t.flatMap(x => x.cs).slice(0, 8);
+  const color = pct >= 80 ? 'var(--ok)' : pct >= 50 ? 'var(--c-home)' : 'var(--bad)';
+  const msg = pct >= 80 ? '¡Excelente conversación! Se nota el avance.' : pct >= 50 ? 'Buen trabajo. Repasa los errores y la próxima saldrá mejor.' : 'Cada conversación suma. Repasa estos errores en tus tarjetas.';
+  const sc = SCENARIOS.find(s => s.id === $('#scenario').value), pr = $('#persona').value;
+  const st = todayStats(); st.talkTurns = (st.talkTurns || 0) + t.length; st.talkOk = (st.talkOk || 0) + ok;
+  D.talkSessions = (D.talkSessions || []).concat([{ date: dayKey(), scenario: sc.id, persona: pr, turns: t.length, ok, avg: +avg }]).slice(-60);
+  persist();
+  $('#composer').hidden = true;
+  const div = chatAdd(`<div class="summary">
+    <div class="sum-head">${avatarHTML(pr, PERSONAS[pr].name, 'md')}<div><strong>Resumen de la conversación</strong><br><span class="muted small">${esc(sc.es)} · ${esc(PERSONAS[pr].name)} · ${mins} min</span></div></div>
+    <div class="sum-ring" style="--p:${pct};--rc:${color}"><div><b>${pct}%</b><small>aciertos</small></div></div>
+    <p class="sum-msg">${msg}</p>
+    <div class="sum-stats">
+      <div><b>${ok} de ${t.length}</b><small>frases correctas</small></div>
+      <div><b>${avg}</b><small>nota promedio /10</small></div>
+      <div><b>${errs.length}</b><small>errores a repasar</small></div>
+    </div>
+    ${errs.length ? `<div class="sum-errs"><strong>Para repasar</strong>${errs.map(c => `<div class="fix"><span class="from">${esc(c.original)}</span> → <span class="to">${esc(c.corrected)}</span><span class="why">${esc(c.explanation_es || '')}</span></div>`).join('')}</div>` : ''}
+    <div class="row-btns">
+      ${errs.length ? '<button class="btn" data-a="cards">🃏 Repasar en tarjetas</button>' : ''}
+      <button class="btn primary" data-a="new">Nueva conversación</button>
+    </div></div>`, 'feedback summary-card');
+  div.querySelector('[data-a=new]').onclick = resetTalk;
+  const cb = div.querySelector('[data-a=cards]'); if (cb) cb.onclick = () => { resetTalk(); show('notes'); applyReviewMode('cards'); };
+}
+$('#btnNewTalk').addEventListener('click', showTalkSummary);
 async function sendTalk() {
   const text = $('#talkInput').value.trim();
   if (!text || talk.busy) return;
@@ -528,11 +695,11 @@ async function sendTalk() {
 }
 $('#btnSend').addEventListener('click', sendTalk);
 $('#talkInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTalk(); } });
-$('#btnMic').addEventListener('click', () => listen({
-  button: $('#btnMic'),
-  onInterim: t => { $('#talkInput').value = t; },
-  onFinal: t => { $('#talkInput').value = t; if (S.autoSend) sendTalk(); }
-}));
+$('#btnMic').addEventListener('click', () => {
+  const onText = t => { $('#talkInput').value = t; if (S.autoSend) sendTalk(); };
+  if (S.micMode === 'record') recordVoice({ button: $('#btnMic'), input: $('#talkInput'), onText });
+  else listen({ button: $('#btnMic'), onInterim: t => { $('#talkInput').value = t; }, onFinal: onText });
+});
 $('#btnHint').addEventListener('click', async () => {
   if (talk.busy) return;
   const btn = $('#btnHint'); btn.disabled = true;
@@ -916,6 +1083,8 @@ function initSettings() {
   $('#apiKey').value = S.apiKey; $('#level').value = S.level; $('#goal').value = String(S.goal);
   $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
   $('#silence').value = String(S.silence ?? 5);
+  $('#micMode').value = S.micMode || 'record';
+  $('#appVersion').textContent = 'Mill English · versión ' + APP_VERSION;
   $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
   $('#pitch').value = S.pitch; $('#pitchVal').textContent = S.pitch;
   fillModels(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
@@ -927,6 +1096,7 @@ $('#level').addEventListener('change', e => { S.level = e.target.value; persist(
 $('#goal').addEventListener('change', e => { S.goal = +e.target.value; persist(); updateHome(); });
 $('#autoSend').addEventListener('change', e => { S.autoSend = e.target.checked; persist(); });
 $('#silence').addEventListener('change', e => { S.silence = +e.target.value; persist(); });
+$('#micMode').addEventListener('change', e => { S.micMode = e.target.value; persist(); });
 $('#autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; persist(); });
 $$('.voice-sel').forEach(sel => sel.addEventListener('change', e => { S.voices[sel.dataset.role] = e.target.value; persist(); }));
 const TEST_LINES = {
@@ -1377,9 +1547,11 @@ async function tutorAsk(q) {
 $('#tutorSend').onclick = () => tutorAsk($('#tutorInput').value);
 $('#tutorInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tutorAsk($('#tutorInput').value); } });
 $$('#tutorChips .chip').forEach(b => b.onclick = () => tutorAsk(b.dataset.q));
-$('#tutorMic').onclick = () => listen({ button: $('#tutorMic'), lang: 'es-CL',
-  onInterim: t => { $('#tutorInput').value = t; },
-  onFinal: t => { $('#tutorInput').value = t; } });
+$('#tutorMic').onclick = () => {
+  const onText = t => { $('#tutorInput').value = t; };
+  if (S.micMode === 'record') recordVoice({ button: $('#tutorMic'), lang: 'es-CL', input: $('#tutorInput'), onText });
+  else listen({ button: $('#tutorMic'), lang: 'es-CL', onInterim: onText, onFinal: onText });
+};
 $('#btnTutor').onclick = () => show(currentView === 'tutor' ? 'home' : 'tutor');
 
 /* ============ Test de nivel ============ */

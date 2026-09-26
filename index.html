@@ -79,7 +79,7 @@
     <div class="composer" id="composer" hidden>
       <div class="composer-row">
         <button class="btn ghost small" id="btnHint">¿Qué digo?</button>
-        <button class="btn ghost small" id="btnNewTalk">Nueva</button>
+        <button class="btn ghost small" id="btnNewTalk">✓ Terminar y ver resumen</button>
       </div>
       <div class="composer-row">
         <textarea id="talkInput" rows="2" placeholder="Habla o escribe en inglés…" autocomplete="off"></textarea>
@@ -334,6 +334,12 @@
           <option value="30">30 minutos</option>
         </select>
       </label>
+      <label>Micrófono en Hablar y Tutor
+        <select id="micMode">
+          <option value="record">Grabar y transcribir con IA (sin cortes, recomendado)</option>
+          <option value="phone">Reconocimiento del teléfono (más rápido, puede cortarse)</option>
+        </select>
+      </label>
       <label>Micrófono: terminar de escuchar
         <select id="silence">
           <option value="3">Tras 3 segundos de silencio</option>
@@ -396,6 +402,7 @@
       <button class="btn danger" id="btnReset">Borrar todo el progreso</button>
     </div>
     <button class="btn wide" id="btnCloseSettings">Volver</button>
+    <p class="muted small" id="appVersion" style="text-align:center;margin-top:14px"></p>
   </section>
 </main>
 
