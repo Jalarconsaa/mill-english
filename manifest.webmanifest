@@ -1,0 +1,17 @@
+{
+  "name": "Mill English – Inglés para el aserradero",
+  "short_name": "Mill English",
+  "description": "Practica inglés hablando, escuchando y deletreando, con vocabulario de aserradero.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1D2B24",
+  "theme_color": "#1D2B24",
+  "lang": "es-CL",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

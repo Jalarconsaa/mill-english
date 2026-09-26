@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1D2B24">
+<title>Mill English</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="stamp">Mill English</span></div>
+  <div class="today-chip" id="todayChip">0 / 20 min</div>
+  <button class="icon-btn" id="btnSettings" aria-label="Ajustes">⚙︎</button>
+</header>
+
+<main id="main">
+  <!-- HOY -->
+  <section class="view active" id="view-home">
+    <div class="board">
+      <div class="board-head">
+        <h1 id="homeGreeting">Turno de inglés</h1>
+        <p class="muted" id="homeSub">Tu meta: 20 minutos hoy.</p>
+      </div>
+      <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="meter-labels"><span id="minsToday">0 min</span><span id="streak">Racha: 0 días</span></div>
+    </div>
+
+    <h2 class="section-title">Rutina de hoy</h2>
+    <ol class="routine">
+      <li data-go="dict" id="r-dict"><span class="tick"></span><div><strong>Dictado</strong><span>5–10 min · escucha y escribe frases del trabajo</span></div></li>
+      <li data-go="spell" id="r-spell"><span class="tick"></span><div><strong>Deletreo</strong><span>3–5 min · palabras, códigos y alfabeto fonético</span></div></li>
+      <li data-go="talk" id="r-talk"><span class="tick"></span><div><strong>Conversación</strong><span>5–15 min · habla con un técnico virtual</span></div></li>
+      <li data-go="notes" id="r-notes"><span class="tick"></span><div><strong>Repaso de errores</strong><span>2 min · lo que más te cuesta</span></div></li>
+    </ol>
+
+    <h2 class="section-title">Últimos 7 días</h2>
+    <div class="week" id="week"></div>
+
+    <div class="notice" id="keyNotice" hidden>
+      <p>Para conversar con el técnico virtual necesitas una clave gratuita de Google Gemini. El dictado y el deletreo funcionan sin clave.</p>
+      <button class="btn" data-open-settings>Configurar clave</button>
+    </div>
+  </section>
+
+  <!-- HABLAR -->
+  <section class="view" id="view-talk">
+    <div class="talk-setup" id="talkSetup">
+      <label>Escenario
+        <select id="scenario"></select>
+      </label>
+      <label>Técnico
+        <select id="persona">
+          <option value="lars">Lars · sueco</option>
+          <option value="mike">Mike · canadiense</option>
+        </select>
+      </label>
+      <button class="btn primary wide" id="btnStartTalk">Empezar conversación</button>
+    </div>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <div class="composer" id="composer" hidden>
+      <div class="composer-row">
+        <button class="btn ghost small" id="btnHint">¿Qué digo?</button>
+        <button class="btn ghost small" id="btnNewTalk">Nueva</button>
+      </div>
+      <div class="composer-row">
+        <textarea id="talkInput" rows="2" placeholder="Habla o escribe en inglés…" autocomplete="off"></textarea>
+        <button class="mic" id="btnMic" aria-label="Hablar">🎙</button>
+        <button class="send" id="btnSend" aria-label="Enviar">➤</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- DICTADO -->
+  <section class="view" id="view-dict">
+    <div class="chips" id="dictCats"></div>
+    <div class="card-plain">
+      <div class="progress-line"><span id="dictCount">1 / 8</span><span id="dictScore"></span></div>
+      <div class="play-row">
+        <button class="play" id="dictPlay">▶ Escuchar</button>
+        <button class="btn ghost" id="dictSlow">🐢 Lento</button>
+      </div>
+      <input id="dictInput" type="text" placeholder="Escribe lo que escuchas" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div class="row-btns">
+        <button class="btn primary" id="dictCheck">Revisar</button>
+        <button class="btn ghost" id="dictNext">Siguiente</button>
+      </div>
+      <div class="result" id="dictResult"></div>
+    </div>
+    <button class="btn wide" id="dictAI">Generar frases nuevas con IA</button>
+  </section>
+
+  <!-- DELETREO -->
+  <section class="view" id="view-spell">
+    <div class="chips" id="spellModes">
+      <button class="chip on" data-mode="words">Palabras técnicas</button>
+      <button class="chip" data-mode="codes">Códigos</button>
+      <button class="chip" data-mode="numbers">Números</button>
+      <button class="chip" data-mode="nato">Alfabeto fonético</button>
+    </div>
+    <div class="card-plain">
+      <p class="muted" id="spellHelp"></p>
+      <div class="big-target" id="spellTarget" hidden></div>
+      <div class="play-row" id="spellPlayRow">
+        <button class="play" id="spellPlay">▶ Escuchar</button>
+        <button class="btn ghost" id="spellSlow">🐢 Letra por letra</button>
+      </div>
+      <div class="composer-row" id="spellInputRow">
+        <input id="spellInput" type="text" placeholder="Escribe aquí" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button class="mic" id="spellMic" aria-label="Deletrear hablando" hidden>🎙</button>
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" id="spellCheck">Revisar</button>
+        <button class="btn ghost" id="spellNext">Siguiente</button>
+      </div>
+      <div class="result" id="spellResult"></div>
+    </div>
+    <details class="nato-table">
+      <summary>Ver alfabeto fonético</summary>
+      <div id="natoGrid" class="nato-grid"></div>
+    </details>
+  </section>
+
+  <!-- ERRORES -->
+  <section class="view" id="view-notes">
+    <div class="notes-head">
+      <p class="muted" id="notesSummary"></p>
+      <button class="btn primary" id="notesPractice">Practicar en dictado</button>
+    </div>
+    <div id="notesList"></div>
+  </section>
+
+  <!-- AJUSTES -->
+  <section class="view" id="view-settings">
+    <h2 class="section-title">Inteligencia artificial (gratis)</h2>
+    <div class="card-plain">
+      <p class="muted">Crea tu clave gratuita en Google AI Studio con tu cuenta de Google y pégala aquí. Se guarda solo en este teléfono.</p>
+      <a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Abrir Google AI Studio</a>
+      <label>Clave de API de Gemini
+        <input id="apiKey" type="password" placeholder="AIza…" autocomplete="off">
+      </label>
+      <label>Modelo
+        <div class="composer-row">
+          <select id="model"></select>
+          <button class="btn ghost small" id="btnModels">Buscar modelos</button>
+        </div>
+      </label>
+      <button class="btn" id="btnTestKey">Probar conexión</button>
+      <p class="muted small" id="keyStatus"></p>
+    </div>
+
+    <h2 class="section-title">Práctica</h2>
+    <div class="card-plain">
+      <label>Tu nivel
+        <select id="level">
+          <option value="A2">Básico (A2)</option>
+          <option value="B1">Intermedio (B1)</option>
+          <option value="B2">Intermedio alto (B2)</option>
+        </select>
+      </label>
+      <label>Meta diaria
+        <select id="goal">
+          <option value="15">15 minutos</option>
+          <option value="20">20 minutos</option>
+          <option value="30">30 minutos</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="autoSend"> Enviar automáticamente al terminar de hablar</label>
+      <label class="check"><input type="checkbox" id="autoSpeak"> Leer en voz alta las respuestas del técnico</label>
+    </div>
+
+    <h2 class="section-title">Voz</h2>
+    <div class="card-plain">
+      <label>Voz en inglés
+        <select id="voice"></select>
+      </label>
+      <label>Velocidad normal <span id="rateVal"></span>
+        <input type="range" id="rate" min="0.6" max="1.2" step="0.05">
+      </label>
+      <button class="btn ghost" id="btnTestVoice">Probar voz</button>
+    </div>
+
+    <h2 class="section-title">Tus datos</h2>
+    <div class="card-plain">
+      <div class="row-btns">
+        <button class="btn ghost" id="btnExport">Exportar respaldo</button>
+        <label class="btn ghost file-btn">Importar respaldo<input type="file" id="fileImport" accept="application/json" hidden></label>
+      </div>
+      <button class="btn danger" id="btnReset">Borrar todo el progreso</button>
+    </div>
+    <button class="btn wide" id="btnCloseSettings">Volver</button>
+  </section>
+</main>
+
+<nav class="tabbar" id="tabbar">
+  <button data-view="home" class="on"><span>⌂</span>Hoy</button>
+  <button data-view="talk"><span>🗣</span>Hablar</button>
+  <button data-view="dict"><span>🎧</span>Dictado</button>
+  <button data-view="spell"><span>🔤</span>Deletreo</button>
+  <button data-view="notes"><span>📒</span>Errores</button>
+</nav>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

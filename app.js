@@ -1,0 +1,706 @@
+'use strict';
+/* ============ Utilidades y almacenamiento ============ */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+function load(key, def) {
+  try { const v = localStorage.getItem(key); return v ? Object.assign(structuredClone(def), JSON.parse(v)) : structuredClone(def); }
+  catch { return structuredClone(def); }
+}
+function persist() {
+  try { localStorage.setItem('me_settings', JSON.stringify(S)); localStorage.setItem('me_data', JSON.stringify(D)); }
+  catch (e) { console.warn('No se pudo guardar', e); }
+}
+const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
+  autoSend: true, autoSpeak: true, voice: '', rate: 0.95 });
+const D = load('me_data', { stats: {}, notes: [] });
+
+function dayKey(d = new Date()) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function todayStats() {
+  const k = dayKey();
+  if (!D.stats[k]) D.stats[k] = { secs: 0, dict: 0, spell: 0, talk: 0, notes: 0 };
+  return D.stats[k];
+}
+function bump(field) { todayStats()[field]++; persist(); updateHome(); }
+
+let toastTimer;
+function toast(msg, ms = 2600) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ============ Tiempo de práctica ============ */
+let currentView = 'home', lastAct = 0;
+function activity() {
+  const now = Date.now();
+  if (!['home', 'settings'].includes(currentView) && lastAct) {
+    const gap = now - lastAct;
+    if (gap < 90000) { todayStats().secs += gap / 1000; persist(); updateChip(); }
+  }
+  lastAct = now;
+}
+['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, activity, { passive: true }));
+document.addEventListener('visibilitychange', () => { if (document.hidden) lastAct = 0; });
+
+/* ============ Navegación ============ */
+function show(view) {
+  activity();
+  currentView = view;
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
+  $$('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+  $('#main').scrollTop = 0;
+  if (view === 'home') updateHome();
+  if (view === 'notes') { renderNotes(); if (D.notes.length && !todayStats().notes) bump('notes'); }
+  if (view === 'dict' && !dict.items.length) loadDict(dict.cat);
+  if (view === 'spell' && !spell.target) newSpell();
+}
+$$('.tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+$('#btnSettings').addEventListener('click', () => show(currentView === 'settings' ? 'home' : 'settings'));
+$('#btnCloseSettings').addEventListener('click', () => show('home'));
+document.addEventListener('click', e => { if (e.target.closest('[data-open-settings]')) show('settings'); });
+$$('.routine li').forEach(li => li.addEventListener('click', () => show(li.dataset.go)));
+
+/* ============ Voz: hablar (TTS) ============ */
+let voices = [];
+function loadVoices() {
+  voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('en'));
+  const sel = $('#voice');
+  sel.innerHTML = voices.length ? '' : '<option value="">Voz predeterminada</option>';
+  const pref = ['en-US', 'en-CA', 'en-GB'];
+  voices.sort((a, b) => (pref.indexOf(a.lang.replace('_', '-')) + 10 * !pref.includes(a.lang.replace('_', '-'))) -
+                        (pref.indexOf(b.lang.replace('_', '-')) + 10 * !pref.includes(b.lang.replace('_', '-'))));
+  voices.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); });
+  if (S.voice && voices.some(v => v.name === S.voice)) sel.value = S.voice;
+}
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+
+function speak(text, rate = S.rate) {
+  return new Promise(res => {
+    if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return res(); }
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = voices.find(v => v.name === S.voice) || voices[0];
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
+    u.rate = rate; u.onend = res; u.onerror = res;
+    speechSynthesis.speak(u);
+  });
+}
+async function speakSequence(parts, rate, gap = 250) {
+  speechSynthesis.cancel();
+  const token = (speakSequence.token = (speakSequence.token || 0) + 1);
+  for (const p of parts) {
+    if (token !== speakSequence.token) return;
+    if (p === ' ') { await new Promise(r => setTimeout(r, gap * 2)); continue; }
+    await speak(p, rate);
+    await new Promise(r => setTimeout(r, gap));
+  }
+}
+
+/* ============ Voz: escuchar (reconocimiento) ============ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let activeRec = null;
+function listen({ onInterim, onFinal, button }) {
+  if (!SR) { toast('Tu navegador no reconoce voz. Usa Chrome en Android.'); return; }
+  if (activeRec) { activeRec.stop(); return; }
+  speechSynthesis.cancel();
+  const rec = new SR();
+  rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
+  let finalText = '';
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+      else interim += e.results[i][0].transcript;
+    }
+    onInterim && onInterim((finalText + interim).trim());
+  };
+  rec.onerror = e => {
+    if (e.error === 'not-allowed') toast('Permite el uso del micrófono en los ajustes del navegador.');
+    else if (e.error === 'no-speech') toast('No te escuché. Intenta de nuevo, más cerca del teléfono.');
+    else if (e.error === 'network') toast('El reconocimiento de voz necesita internet.');
+  };
+  rec.onend = () => {
+    activeRec = null; button && button.classList.remove('listening');
+    if (finalText.trim()) onFinal && onFinal(finalText.trim());
+  };
+  activeRec = rec; button && button.classList.add('listening');
+  rec.start();
+}
+
+/* ============ IA (Google Gemini, plan gratuito) ============ */
+async function gemini(system, contents, temperature = 0.8) {
+  if (!S.apiKey) throw new Error('NOKEY');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.model)}:generateContent`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.apiKey },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents,
+      generationConfig: { temperature, responseMimeType: 'application/json' }
+    })
+  });
+  if (!res.ok) {
+    let detail = ''; try { detail = (await res.json()).error?.message || ''; } catch {}
+    const err = new Error(detail || res.statusText); err.status = res.status; throw err;
+  }
+  const data = await res.json();
+  const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
+  if (!text) throw new Error('La IA no devolvió respuesta. Intenta de nuevo.');
+  return parseJSON(text);
+}
+function parseJSON(text) {
+  const clean = text.replace(/```json|```/g, '').trim();
+  try { return JSON.parse(clean); }
+  catch { const m = clean.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('Respuesta de la IA con formato inválido.'); }
+}
+function aiErrorMsg(e) {
+  if (e.message === 'NOKEY') return 'Primero configura tu clave gratuita de Gemini en Ajustes.';
+  if (e.status === 429) return 'Llegaste al límite gratuito por minuto o por día. Espera un momento y reintenta.';
+  if (e.status === 400 && /api key/i.test(e.message)) return 'La clave no es válida. Revísala en Ajustes.';
+  if (e.status === 403) return 'La clave no tiene permiso. Crea una nueva en Google AI Studio.';
+  if (e.status === 404) return 'El modelo no existe. En Ajustes toca "Buscar modelos" y elige otro.';
+  if (e instanceof TypeError) return 'Sin conexión a internet.';
+  return 'Error de la IA: ' + e.message;
+}
+
+/* ============ Inicio (Hoy) ============ */
+function updateChip() {
+  const m = Math.floor(todayStats().secs / 60);
+  $('#todayChip').textContent = `${m} / ${S.goal} min`;
+}
+function streak() {
+  let n = 0; const d = new Date();
+  const met = k => (D.stats[k]?.secs || 0) >= S.goal * 60;
+  if (!met(dayKey(d))) d.setDate(d.getDate() - 1);
+  while (met(dayKey(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+function updateHome() {
+  updateChip();
+  const st = todayStats(), m = Math.floor(st.secs / 60);
+  const h = new Date().getHours();
+  $('#homeGreeting').textContent = h < 12 ? 'Good morning' : h < 20 ? 'Good afternoon' : 'Good evening';
+  $('#homeSub').textContent = m >= S.goal ? '¡Meta de hoy cumplida! Cada minuto extra suma.' : `Te faltan ${S.goal - m} min para tu meta de ${S.goal}.`;
+  $('#meterFill').style.width = Math.min(100, st.secs / (S.goal * 60) * 100) + '%';
+  $('#minsToday').textContent = `${m} min hoy`;
+  const s = streak(); $('#streak').textContent = `Racha: ${s} ${s === 1 ? 'día' : 'días'}`;
+  $('#r-dict').classList.toggle('done', st.dict >= 5);
+  $('#r-spell').classList.toggle('done', st.spell >= 5);
+  $('#r-talk').classList.toggle('done', st.talk >= 4);
+  $('#r-notes').classList.toggle('done', st.notes >= 1);
+  const days = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+  let html = '';
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const secs = D.stats[dayKey(d)]?.secs || 0;
+    const pct = Math.min(100, secs / (S.goal * 60) * 100);
+    html += `<div class="day"><div class="bar ${secs >= S.goal * 60 ? 'met' : ''}" style="height:${Math.max(3, pct * 0.8)}%" title="${Math.round(secs / 60)} min"></div>${i === 0 ? 'Hoy' : days[d.getDay()]}</div>`;
+  }
+  $('#week').innerHTML = html;
+  $('#keyNotice').hidden = !!S.apiKey;
+}
+
+/* Botón de instalación */
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); installEvt = e;
+  if ($('#btnInstall')) return;
+  const b = document.createElement('button');
+  b.id = 'btnInstall'; b.className = 'btn primary wide'; b.textContent = 'Instalar en el teléfono';
+  b.onclick = async () => { installEvt.prompt(); await installEvt.userChoice; b.remove(); };
+  $('#view-home .board').after(b);
+});
+
+/* ============ Notas de errores ============ */
+function addNote({ original, corrected, explanation, type, sentence, source }) {
+  if (!corrected || !original || original.trim().toLowerCase() === corrected.trim().toLowerCase()) return;
+  const key = (original + '→' + corrected).toLowerCase().trim();
+  const n = D.notes.find(n => n.key === key);
+  if (n) { n.count++; n.last = Date.now(); if (sentence) n.sentence = sentence; }
+  else D.notes.push({ key, original, corrected, explanation: explanation || '', type: type || 'grammar',
+    sentence: sentence || '', source: source || '', count: 1, last: Date.now() });
+  persist();
+}
+
+/* ============ Conversación ============ */
+const talk = { history: [], active: false, busy: false };
+const LEVEL_NOTES = {
+  A2: 'Use simple vocabulary and short sentences. Speak slowly and clearly. Avoid idioms.',
+  B1: 'Use everyday vocabulary with some technical sawmill terms and a few common phrasal verbs.',
+  B2: 'Speak naturally, with idioms and phrasal verbs common at work, like a real technician would.'
+};
+SCENARIOS.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; $('#scenario').appendChild(o); });
+
+function talkSystem() {
+  const sc = SCENARIOS.find(s => s.id === $('#scenario').value), p = PERSONAS[$('#persona').value];
+  return `You are ${p.en}
+You are visiting a sawmill in Chile that uses Swedish and Canadian machinery. You are talking with a Chilean sawmill worker who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
+SCENARIO: ${sc.en}
+
+RULES FOR YOUR REPLY:
+- Stay in character. Talk like in a real conversation at the mill, never like a teacher.
+- Keep each reply short: 1 to 3 sentences. ${LEVEL_NOTES[S.level]}
+- Usually end with a question or something that invites the learner to answer.
+- Use real sawmill vocabulary when it fits (saw blades, edger, trimmer, kiln, conveyor, bearings, PLC, lockout, shift, downtime...).
+
+RULES FOR FEEDBACK about the learner's LAST message:
+- The learner's text comes from speech recognition: ignore punctuation, capitalization and obvious transcription glitches. Focus on grammar, word choice, missing words, word order and phrases that sound unnatural.
+- List only real mistakes, maximum 4, the most important first. If the message is correct, return an empty corrections list.
+- Explanations in simple Spanish (Chile), maximum 20 words each.
+- If the learner writes in Spanish or mixes Spanish, put the English version in "natural" and in praise_es encourage them to say it in English.
+- If the learner's message is "[START]", give no feedback and just open the conversation in character.
+
+Respond ONLY with a JSON object, with exactly these keys:
+{"corrections":[{"original":"wrong fragment as the learner said it","corrected":"corrected fragment","explanation_es":"...","type":"grammar|vocabulary|natural"}],
+"natural":"how a native speaker would say the learner's whole message (empty string for [START])",
+"score": integer 0-10 for correctness and naturalness (0 for [START]),
+"praise_es":"one short encouraging comment in Spanish (empty for [START])",
+"reply":"your in-character reply in English",
+"reply_es":"Spanish translation of your reply"}`;
+}
+
+function chatAdd(html, cls) {
+  const div = document.createElement('div'); div.className = cls; div.innerHTML = html;
+  $('#chat').appendChild(div);
+  requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+  return div;
+}
+function addAIMsg(reply, replyEs) {
+  const name = PERSONAS[$('#persona').value].name;
+  const div = chatAdd(`<div class="who">${esc(name)}</div><div>${esc(reply)}</div>
+    <div class="es" hidden>${esc(replyEs)}</div>
+    <div class="tools"><button data-a="speak">🔊 Escuchar</button><button data-a="slow">🐢 Lento</button><button data-a="es">Traducir</button></div>`, 'msg ai');
+  div.querySelector('[data-a=speak]').onclick = () => speak(reply);
+  div.querySelector('[data-a=slow]').onclick = () => speak(reply, 0.7);
+  div.querySelector('[data-a=es]').onclick = () => { const e = div.querySelector('.es'); e.hidden = !e.hidden; };
+  if (S.autoSpeak) speak(reply);
+}
+function addFeedback(r, said) {
+  const cs = Array.isArray(r.corrections) ? r.corrections : [];
+  const perfect = !cs.length;
+  let html = `<span class="score">${Number(r.score) || 0}/10</span><strong>${perfect ? 'Bien dicho' : 'Correcciones'}</strong>`;
+  if (r.praise_es) html += `<div>${esc(r.praise_es)}</div>`;
+  cs.forEach(c => {
+    html += `<div class="fix"><span class="from">${esc(c.original)}</span> → <span class="to">${esc(c.corrected)}</span><span class="why">${esc(c.explanation_es)}</span></div>`;
+    addNote({ original: c.original, corrected: c.corrected, explanation: c.explanation_es, type: c.type, sentence: r.natural, source: 'Conversación' });
+  });
+  if (r.natural && r.natural.trim().toLowerCase().replace(/[^a-z ]/g, '') !== said.trim().toLowerCase().replace(/[^a-z ]/g, '')) {
+    html += `<div class="fix">Más natural: <span class="natural">${esc(r.natural)}</span> <button class="btn ghost small" data-a="nat">🔊</button></div>`;
+  }
+  const div = chatAdd(html, 'feedback' + (perfect ? '' : ' has-errors'));
+  const nb = div.querySelector('[data-a=nat]'); if (nb) nb.onclick = () => speak(r.natural);
+}
+
+async function talkCall(userText) {
+  talk.history.push({ role: 'user', parts: [{ text: userText }] });
+  if (talk.history.length > 24) { talk.history = talk.history.slice(-22); while (talk.history[0].role !== 'user') talk.history.shift(); }
+  talk.busy = true; $('#btnSend').disabled = true;
+  const typing = chatAdd('Escribiendo…', 'msg ai typing');
+  try {
+    const r = await gemini(talkSystem(), talk.history);
+    typing.remove();
+    if (userText !== '[START]') { addFeedback(r, userText); bump('talk'); }
+    addAIMsg(r.reply || '…', r.reply_es || '');
+    talk.history.push({ role: 'model', parts: [{ text: r.reply || '' }] });
+    activity();
+    return true;
+  } catch (e) {
+    typing.remove(); talk.history.pop();
+    chatAdd(esc(aiErrorMsg(e)), 'feedback has-errors');
+    return false;
+  } finally { talk.busy = false; $('#btnSend').disabled = false; }
+}
+
+$('#btnStartTalk').addEventListener('click', async () => {
+  if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini.'); show('settings'); return; }
+  talk.history = []; $('#chat').innerHTML = '';
+  $('#talkSetup').hidden = true; $('#composer').hidden = false;
+  const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
+  chatAdd(`<strong>${esc(sc.es)}</strong> con ${esc(PERSONAS[$('#persona').value].es)}. Responde hablando con el micrófono 🎙 o escribiendo.`, 'hints');
+  const ok = await talkCall('[START]');
+  if (!ok) { $('#talkSetup').hidden = false; $('#composer').hidden = true; }
+});
+$('#btnNewTalk').addEventListener('click', () => {
+  speechSynthesis.cancel(); $('#chat').innerHTML = ''; talk.history = [];
+  $('#talkSetup').hidden = false; $('#composer').hidden = true;
+});
+async function sendTalk() {
+  const text = $('#talkInput').value.trim();
+  if (!text || talk.busy) return;
+  $('#talkInput').value = '';
+  chatAdd(esc(text), 'msg me');
+  const ok = await talkCall(text);
+  if (!ok) $('#talkInput').value = text;
+}
+$('#btnSend').addEventListener('click', sendTalk);
+$('#talkInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTalk(); } });
+$('#btnMic').addEventListener('click', () => listen({
+  button: $('#btnMic'),
+  onInterim: t => { $('#talkInput').value = t; },
+  onFinal: t => { $('#talkInput').value = t; if (S.autoSend) sendTalk(); }
+}));
+$('#btnHint').addEventListener('click', async () => {
+  if (talk.busy) return;
+  const btn = $('#btnHint'); btn.disabled = true;
+  try {
+    const r = await gemini(
+      `You help a Chilean sawmill worker (CEFR ${S.level}) practice English conversation. Given the conversation so far, suggest 3 different short replies the learner could say next, natural and appropriate for level ${S.level}. Respond ONLY with JSON: {"suggestions":[{"en":"...","es":"Spanish translation"}]}`,
+      [...talk.history, { role: 'user', parts: [{ text: '[HINT] Suggest what I could say next.' }] }], 0.9);
+    const box = chatAdd('<strong>Puedes decir algo como:</strong>', 'hints');
+    (r.suggestions || []).forEach(s => {
+      const b = document.createElement('button');
+      b.innerHTML = `${esc(s.en)}<small>${esc(s.es)}</small>`;
+      b.onclick = () => { speak(s.en); toast('Escúchala y dila tú con el micrófono 🎙'); };
+      box.appendChild(b);
+    });
+  } catch (e) { toast(aiErrorMsg(e), 4000); }
+  finally { btn.disabled = false; }
+});
+
+/* ============ Comparación palabra por palabra ============ */
+const norm = s => s.toLowerCase().replace(/[’‘`]/g, "'").replace(/[-–—/]/g, ' ').replace(/[^a-z0-9' ]/g, '').replace(/\s+/g, ' ').trim();
+function diffWords(target, typed) {
+  const A = norm(target).split(' ').filter(Boolean), B = norm(typed).split(' ').filter(Boolean);
+  const dp = Array.from({ length: A.length + 1 }, () => new Array(B.length + 1).fill(0));
+  for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--)
+    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const ops = []; let i = 0, j = 0, segA = [], segB = [];
+  const flush = () => {
+    const n = Math.max(segA.length, segB.length);
+    for (let k = 0; k < n; k++) {
+      if (segA[k] !== undefined && segB[k] !== undefined) ops.push({ t: 'sub', a: segA[k], b: segB[k] });
+      else if (segA[k] !== undefined) ops.push({ t: 'miss', a: segA[k] });
+      else ops.push({ t: 'extra', b: segB[k] });
+    }
+    segA = []; segB = [];
+  };
+  while (i < A.length && j < B.length) {
+    if (A[i] === B[j]) { flush(); ops.push({ t: 'ok', a: A[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) segA.push(A[i++]);
+    else segB.push(B[j++]);
+  }
+  while (i < A.length) segA.push(A[i++]);
+  while (j < B.length) segB.push(B[j++]);
+  flush();
+  const ok = ops.filter(o => o.t === 'ok').length;
+  return { ops, score: A.length ? ok / A.length : 0 };
+}
+function renderOps(ops) {
+  return ops.map(o => o.t === 'ok' ? `<span class="w-ok">${esc(o.a)}</span>`
+    : o.t === 'sub' ? `<span class="w-bad">${esc(o.b)}</span><span class="w-fix">${esc(o.a)}</span>`
+    : o.t === 'miss' ? `<span class="w-miss">${esc(o.a)}</span>`
+    : `<span class="w-bad">${esc(o.b)}</span>`).join(' ');
+}
+
+/* ============ Dictado ============ */
+const dict = { cat: 'seguridad', items: [], idx: 0, checked: false, total: 0, aiItems: [] };
+function renderDictCats() {
+  const cats = Object.keys(PHRASES).slice();
+  if (D.notes.length) cats.push('errores');
+  if (dict.aiItems.length) cats.push('ia');
+  $('#dictCats').innerHTML = cats.map(c => `<button class="chip ${c === dict.cat ? 'on' : ''}" data-cat="${c}">${c === 'ia' ? 'Nuevas (IA)' : CATEGORY_NAMES[c]}</button>`).join('');
+  $$('#dictCats .chip').forEach(b => b.onclick = () => loadDict(b.dataset.cat));
+}
+function loadDict(cat) {
+  dict.cat = cat;
+  if (cat === 'errores') {
+    const seen = new Set();
+    dict.items = D.notes.slice().sort((a, b) => b.count - a.count).map(n => {
+      const en = n.sentence && n.sentence.split(' ').length <= 16 ? n.sentence : n.corrected;
+      return { en, es: n.explanation };
+    }).filter(it => it.en && !seen.has(it.en) && seen.add(it.en)).slice(0, 8);
+    if (!dict.items.length) { toast('Aún no tienes errores guardados.'); return loadDict('seguridad'); }
+  } else if (cat === 'ia') dict.items = dict.aiItems.slice();
+  else dict.items = shuffle(PHRASES[cat]).slice(0, 8).map(([en, es]) => ({ en, es }));
+  dict.idx = 0; dict.total = 0; renderDictCats(); showDictItem();
+}
+function showDictItem() {
+  dict.checked = false;
+  $('#dictInput').value = ''; $('#dictResult').innerHTML = '';
+  $('#dictCount').textContent = `${dict.idx + 1} / ${dict.items.length}`;
+  $('#dictScore').textContent = dict.idx ? `Promedio ${Math.round(dict.total / dict.idx * 100)}%` : '';
+  $('#dictNext').textContent = 'Saltar';
+}
+const curDict = () => dict.items[dict.idx];
+$('#dictPlay').onclick = () => curDict() && speak(curDict().en);
+$('#dictSlow').onclick = () => curDict() && speak(curDict().en, 0.65);
+function checkDict() {
+  if (!curDict()) return loadDict(dict.cat);
+  if (dict.checked) return nextDict();
+  const typed = $('#dictInput').value.trim();
+  if (!typed) { toast('Escucha y escribe la frase primero.'); return; }
+  const it = curDict(), { ops, score } = diffWords(it.en, typed);
+  dict.checked = true; dict.total += score; bump('dict');
+  const pct = Math.round(score * 100);
+  $('#dictResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 70 ? 'var(--hivis)' : 'var(--bad)'}">${pct === 100 ? 'Perfecto' : pct + '% correcto'}</div>
+    <div class="line">${renderOps(ops)}</div><div class="es">${esc(it.es)}</div>`;
+  ops.filter(o => o.t === 'sub' && o.b.length > 1).forEach(o =>
+    addNote({ original: o.b, corrected: o.a, explanation: 'Escuchaste mal o escribiste mal esta palabra.', type: 'spelling', sentence: it.en, source: 'Dictado' }));
+  $('#dictNext').textContent = dict.idx + 1 < dict.items.length ? 'Siguiente' : 'Terminar';
+}
+function nextDict() {
+  if (dict.idx + 1 >= dict.items.length) {
+    const avg = Math.round(dict.total / dict.items.length * 100);
+    $('#dictResult').innerHTML = `<div class="verdict">Ronda terminada: ${avg}% promedio</div><p class="muted">Elige otra categoría o toca Siguiente para repetir con frases mezcladas.</p>`;
+    dict.idx = dict.items.length; dict.checked = false;
+    $('#dictNext').onclick = () => { $('#dictNext').onclick = nextDict; loadDict(dict.cat); };
+    return;
+  }
+  dict.idx++; showDictItem(); speak(curDict().en);
+}
+$('#dictCheck').onclick = checkDict;
+$('#dictNext').onclick = nextDict;
+$('#dictInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkDict(); } });
+$('#dictAI').onclick = async () => {
+  const btn = $('#dictAI'); btn.disabled = true; btn.textContent = 'Generando…';
+  const weak = D.notes.filter(n => n.type === 'spelling').slice(-12).map(n => n.corrected).join(', ');
+  const topic = CATEGORY_NAMES[dict.cat] && !['errores', 'ia'].includes(dict.cat) ? dict.cat : 'mixed sawmill topics';
+  try {
+    const r = await gemini(
+      `You create listening dictation exercises for a Chilean sawmill worker learning English (CEFR ${S.level}).`,
+      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that Swedish or Canadian service technicians or coworkers would really say at a sawmill. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
+    dict.aiItems = (r.items || []).filter(x => x.en);
+    if (!dict.aiItems.length) throw new Error('No llegaron frases.');
+    loadDict('ia'); toast('Frases nuevas listas. Toca ▶ Escuchar.');
+  } catch (e) { toast(aiErrorMsg(e), 4000); }
+  finally { btn.disabled = false; btn.textContent = 'Generar frases nuevas con IA'; }
+};
+
+/* ============ Deletreo ============ */
+const spell = { mode: 'words', target: null, checked: false };
+const SPELL_HELP = {
+  words: 'Escucha la palabra técnica y escríbela. Usa "Letra por letra" si la necesitas deletreada.',
+  codes: 'Escucha el código deletreado (como un número de parte) y escríbelo. Los guiones y espacios no importan.',
+  numbers: 'Escucha la cifra y escríbela solo con números. Ojo con thirteen (13) y thirty (30).',
+  nato: 'Di el código en voz alta con el alfabeto fonético (ej: "Sierra Kilo two"). Toca 🎙 o escríbelo.'
+};
+const CONFUSING = 'AEIGJBVPDKQYRUHW';
+const LETTERS = 'ABCDEFGHIJKLMNPQRSTUVWXYZ' + CONFUSING; // sin O para no confundir con 0
+const rl = () => pick(LETTERS), rd = () => String(Math.floor(Math.random() * 10));
+function makeCode() {
+  const pats = [
+    () => rl() + rl() + rl() + '-' + rd() + rd() + rd() + rd(),
+    () => rl() + rd() + rd() + '-' + rl() + rl(),
+    () => 'SN ' + rd() + rd() + rl() + rd() + rl() + rd(),
+    () => rl() + rl() + ' ' + rd() + rd() + rd(),
+    () => rd() + rd() + rl() + '-' + rl() + rd() + rl()
+  ];
+  return pick(pats)();
+}
+function makeNumber() {
+  const units = ['bar', 'RPM', 'millimeters', 'inches', 'logs', 'boards', 'meters', 'degrees', 'percent', 'hours', 'kilos'];
+  const kinds = [
+    () => pick([13, 14, 15, 16, 17, 18, 19, 30, 40, 50, 60, 70, 80, 90]),
+    () => Math.floor(Math.random() * 900 + 100),
+    () => Math.floor(Math.random() * 9000 + 1000),
+    () => (Math.floor(Math.random() * 99) + 1) / 10,
+    () => Math.floor(Math.random() * 80 + 20)
+  ];
+  const n = pick(kinds)();
+  return { value: String(n), unit: pick(units) };
+}
+function charSpeech(ch) {
+  if (/[0-9]/.test(ch)) return DIGIT_WORDS[+ch];
+  if (ch === '-') return 'dash';
+  if (ch === ' ') return ' ';
+  return ch.toUpperCase() + '.';
+}
+function newSpell() {
+  spell.checked = false;
+  $('#spellInput').value = ''; $('#spellResult').innerHTML = '';
+  $('#spellHelp').textContent = SPELL_HELP[spell.mode];
+  const isNato = spell.mode === 'nato';
+  $('#spellTarget').hidden = !isNato; $('#spellMic').hidden = !isNato;
+  $('#spellPlay').textContent = isNato ? '▶ Escuchar respuesta' : '▶ Escuchar';
+  $('#spellSlow').hidden = isNato || spell.mode === 'numbers';
+  $('#spellSlow').textContent = spell.mode === 'codes' ? '🐢 Más lento' : '🐢 Letra por letra';
+  $('#spellInput').placeholder = isNato ? 'O escribe: Sierra Kilo two…' : spell.mode === 'numbers' ? 'Solo números, ej: 1450' : 'Escribe aquí';
+  $('#spellInput').inputMode = spell.mode === 'numbers' ? 'decimal' : 'text';
+  if (spell.mode === 'words') { const [en, es] = pick(WORDS); spell.target = { text: en, es }; }
+  else if (spell.mode === 'codes') spell.target = { text: makeCode() };
+  else if (spell.mode === 'numbers') { const n = makeNumber(); spell.target = { text: n.value, unit: n.unit }; }
+  else { let c = ''; const len = 4 + Math.floor(Math.random() * 3); for (let i = 0; i < len; i++) c += Math.random() < 0.7 ? rl() : rd(); spell.target = { text: c }; }
+  $('#spellTarget').textContent = spell.target.text;
+  $('#spellNext').textContent = 'Saltar';
+}
+function playSpell(slow) {
+  const t = spell.target; if (!t) return;
+  if (spell.mode === 'words') return slow ? speakSequence(t.text.split('').map(charSpeech), 0.8, 150) : speak(t.text);
+  if (spell.mode === 'codes') return speakSequence(t.text.split('').map(charSpeech), slow ? 0.7 : 0.95, slow ? 450 : 200);
+  if (spell.mode === 'numbers') return speak(`${t.value || t.text} ${t.unit}`);
+  return speakSequence(t.text.split('').map(c => /[0-9]/.test(c) ? DIGIT_WORDS[+c] : NATO[c]), 0.9, 250);
+}
+$('#spellPlay').onclick = () => playSpell(false);
+$('#spellSlow').onclick = () => playSpell(true);
+
+const NATO_REV = Object.fromEntries(Object.entries(NATO).map(([k, v]) => [v.toLowerCase().replace('-', ''), k]));
+Object.assign(NATO_REV, { alfa: 'A', juliett: 'J', whisky: 'W', xray: 'X', yanky: 'Y', charly: 'C', hotels: 'H', mic: 'M', papa: 'P', pappa: 'P', kilo: 'K', keylo: 'K' });
+const DIGIT_REV = { zero: '0', oh: '0', o: '0', one: '1', won: '1', two: '2', to: '2', too: '2', three: '3', tree: '3', four: '4', for: '4', fore: '4', five: '5', fife: '5', six: '6', seven: '7', eight: '8', ate: '8', nine: '9', niner: '9' };
+function parseNato(text) {
+  const tokens = text.toLowerCase().replace(/x[\s-]?ray/g, 'xray').replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  const out = [];
+  tokens.forEach(t => {
+    if (/^[0-9]+$/.test(t)) t.split('').forEach(d => out.push({ ch: d, word: d }));
+    else if (NATO_REV[t]) out.push({ ch: NATO_REV[t], word: t });
+    else if (DIGIT_REV[t]) out.push({ ch: DIGIT_REV[t], word: t });
+    else out.push({ ch: '?', word: t });
+  });
+  return out.filter(o => o.ch !== '?' || o.word.length > 1);
+}
+function charDiffHTML(target, typed) {
+  // Marca letra por letra con alineación simple (LCS)
+  const A = target.split(''), B = typed.split('');
+  const dp = Array.from({ length: A.length + 1 }, () => new Array(B.length + 1).fill(0));
+  for (let i = A.length - 1; i >= 0; i--) for (let j = B.length - 1; j >= 0; j--)
+    dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  let i = 0, j = 0, out = '';
+  while (i < A.length || j < B.length) {
+    if (i < A.length && j < B.length && A[i] === B[j]) { out += `<span class="w-ok">${esc(A[i])}</span>`; i++; j++; }
+    else if (j < B.length && (i >= A.length || dp[i][j + 1] >= dp[i + 1][j])) { out += `<span class="w-bad">${esc(B[j])}</span>`; j++; }
+    else { out += `<span class="w-miss">${esc(A[i])}</span>`; i++; }
+  }
+  return out;
+}
+function checkSpell() {
+  if (spell.checked) return newSpellAndPlay();
+  const raw = $('#spellInput').value.trim();
+  if (!raw) { toast(spell.mode === 'nato' ? 'Toca 🎙 y di el código.' : 'Escribe tu respuesta primero.'); return; }
+  const t = spell.target; let ok = false, html = '';
+  if (spell.mode === 'words') {
+    const typed = raw.toLowerCase();
+    ok = typed === t.text;
+    html = `<div class="line">${ok ? `<span class="w-ok">${esc(t.text)}</span>` : charDiffHTML(t.text, typed)}</div>
+      <div class="es">${esc(t.text)} = ${esc(t.es)} · ${t.text.toUpperCase().split('').join(' ')}</div>`;
+    if (!ok) addNote({ original: typed, corrected: t.text, explanation: `Deletreo: ${t.text.toUpperCase().split('').join('-')} (${t.es})`, type: 'spelling', source: 'Deletreo' });
+  } else if (spell.mode === 'codes') {
+    const clean = s => s.toUpperCase().replace(/[\s-]/g, '');
+    ok = clean(raw) === clean(t.text);
+    html = `<div class="line">${charDiffHTML(clean(t.text), clean(raw))}</div><div class="es">Código: ${esc(t.text)}</div>`;
+  } else if (spell.mode === 'numbers') {
+    const clean = s => { s = s.replace(/\s/g, ''); s = t.text.includes('.') ? s.replace(',', '.') : s.replace(/[.,]/g, ''); return s.replace(/^0+(?=\d)/, ''); };
+    ok = clean(raw) === t.text;
+    const note = t.text.includes('.') ? '<div class="es">En inglés el decimal se dice "point" y se escribe con punto.</div>' : '';
+    html = `<div class="line">${ok ? `<span class="w-ok">${esc(t.text)}</span>` : `<span class="w-bad">${esc(raw)}</span> <span class="w-fix">${esc(t.text)}</span>`} ${esc(t.unit)}</div>${note}`;
+  } else {
+    const heard = parseNato(raw), want = t.text.split('');
+    ok = heard.length === want.length && heard.every((h, k) => h.ch === want[k]);
+    html = '<div class="line">' + want.map((c, k) => {
+      const h = heard[k]; const good = h && h.ch === c;
+      const exp = /[0-9]/.test(c) ? DIGIT_WORDS[+c] : NATO[c];
+      return `<span class="${good ? 'w-ok' : 'w-miss'}">${c}: ${esc(exp)}${!good && h ? ` <small class="w-bad">(${esc(h.word)})</small>` : ''}</span>`;
+    }).join('<br>') + '</div>';
+    if (heard.length > want.length) html += `<div class="es">Dijiste palabras de más: ${esc(heard.slice(want.length).map(h => h.word).join(' '))}</div>`;
+  }
+  spell.checked = true; bump('spell');
+  $('#spellResult').innerHTML = `<div class="verdict" style="color:${ok ? 'var(--ok)' : 'var(--bad)'}">${ok ? 'Correcto' : 'Revisa las marcas'}</div>${html}`;
+  $('#spellNext').textContent = 'Siguiente';
+}
+function newSpellAndPlay() { newSpell(); if (spell.mode !== 'nato') playSpell(false); }
+$('#spellCheck').onclick = checkSpell;
+$('#spellNext').onclick = newSpellAndPlay;
+$('#spellInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkSpell(); } });
+$('#spellMic').onclick = () => listen({ button: $('#spellMic'), onInterim: t => { $('#spellInput').value = t; }, onFinal: t => { $('#spellInput').value = t; checkSpell(); } });
+$$('#spellModes .chip').forEach(b => b.onclick = () => {
+  $$('#spellModes .chip').forEach(x => x.classList.toggle('on', x === b));
+  spell.mode = b.dataset.mode; newSpell();
+});
+$('#natoGrid').innerHTML = Object.entries(NATO).map(([k, v]) => `<button data-w="${v}"><b>${k}</b>${v}</button>`).join('');
+$$('#natoGrid button').forEach(b => b.onclick = () => speak(b.dataset.w));
+
+/* ============ Errores ============ */
+function renderNotes() {
+  const list = D.notes.slice().sort((a, b) => b.count - a.count || b.last - a.last);
+  $('#notesSummary').textContent = list.length ? `${list.length} errores guardados. Los más repetidos aparecen primero.` : '';
+  $('#notesPractice').hidden = !list.length;
+  if (!list.length) { $('#notesList').innerHTML = '<div class="empty">Aquí se guardan tus errores de conversación, dictado y deletreo para repasarlos. Todavía no hay ninguno: ¡a practicar!</div>'; return; }
+  $('#notesList').innerHTML = list.map(n => `<div class="note">
+    <button class="del" data-k="${esc(n.key)}" aria-label="Borrar">×</button>
+    <span class="from">${esc(n.original)}</span><span class="to">${esc(n.corrected)} <button class="btn ghost small" data-say="${esc(n.sentence || n.corrected)}">🔊</button></span>
+    ${n.explanation ? `<div class="why">${esc(n.explanation)}</div>` : ''}
+    ${n.sentence ? `<div class="why">Ej: ${esc(n.sentence)}</div>` : ''}
+    <div class="meta">${esc(n.source)} · ${n.count} ${n.count === 1 ? 'vez' : 'veces'}</div></div>`).join('');
+  $$('#notesList [data-say]').forEach(b => b.onclick = () => speak(b.dataset.say));
+  $$('#notesList .del').forEach(b => b.onclick = () => { D.notes = D.notes.filter(n => n.key !== b.dataset.k); persist(); renderNotes(); });
+}
+$('#notesPractice').onclick = () => { show('dict'); loadDict('errores'); };
+
+/* ============ Ajustes ============ */
+function fillModels(list) {
+  const sel = $('#model'); const set = new Set(list); set.add(S.model);
+  sel.innerHTML = [...set].map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  sel.value = S.model;
+}
+function initSettings() {
+  $('#apiKey').value = S.apiKey; $('#level').value = S.level; $('#goal').value = String(S.goal);
+  $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
+  $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
+  fillModels(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+}
+$('#apiKey').addEventListener('change', e => { S.apiKey = e.target.value.trim(); persist(); updateHome(); });
+$('#model').addEventListener('change', e => { S.model = e.target.value; persist(); });
+$('#level').addEventListener('change', e => { S.level = e.target.value; persist(); });
+$('#goal').addEventListener('change', e => { S.goal = +e.target.value; persist(); updateHome(); });
+$('#autoSend').addEventListener('change', e => { S.autoSend = e.target.checked; persist(); });
+$('#autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; persist(); });
+$('#voice').addEventListener('change', e => { S.voice = e.target.value; persist(); });
+$('#rate').addEventListener('input', e => { S.rate = +e.target.value; $('#rateVal').textContent = S.rate + 'x'; persist(); });
+$('#btnTestVoice').onclick = () => speak('Good morning! The saw blades are ready. Shall we start the line?');
+$('#btnModels').onclick = async () => {
+  S.apiKey = $('#apiKey').value.trim(); persist();
+  if (!S.apiKey) { toast('Pega tu clave primero.'); return; }
+  try {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': S.apiKey } });
+    if (!res.ok) throw Object.assign(new Error((await res.json()).error?.message || res.statusText), { status: res.status });
+    const data = await res.json();
+    const models = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace('models/', ''))
+      .filter(n => /^gemini/.test(n) && !/(embed|tts|image|live|audio|vision|exp)/.test(n))
+      .sort((a, b) => (b.includes('flash') - a.includes('flash')) || b.localeCompare(a));
+    if (!models.length) throw new Error('No se encontraron modelos compatibles.');
+    fillModels(models);
+    if (!models.includes(S.model)) { S.model = models[0]; $('#model').value = S.model; persist(); }
+    toast(`${models.length} modelos encontrados. Recomendado: uno "flash".`);
+  } catch (e) { toast(aiErrorMsg(e), 4000); }
+};
+$('#btnTestKey').onclick = async () => {
+  S.apiKey = $('#apiKey').value.trim(); persist(); updateHome();
+  $('#keyStatus').textContent = 'Probando…';
+  try {
+    const r = await gemini('Reply only with JSON.', [{ role: 'user', parts: [{ text: 'Return {"ok":true,"msg":"a short friendly greeting for a sawmill worker"}' }] }], 0.5);
+    $('#keyStatus').textContent = '✓ Conexión correcta: ' + (r.msg || 'OK');
+  } catch (e) { $('#keyStatus').textContent = aiErrorMsg(e); }
+};
+$('#btnExport').onclick = () => {
+  const { apiKey, ...rest } = S;
+  const blob = new Blob([JSON.stringify({ settings: rest, data: D }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `mill-english-respaldo-${dayKey()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+$('#fileImport').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (j.settings) Object.assign(S, j.settings, { apiKey: S.apiKey });
+    if (j.data) { D.stats = j.data.stats || {}; D.notes = j.data.notes || []; }
+    persist(); initSettings(); updateHome(); toast('Respaldo importado.');
+  } catch { toast('Ese archivo no es un respaldo válido.'); }
+  e.target.value = '';
+});
+$('#btnReset').onclick = () => {
+  if (!confirm('¿Borrar todo tu progreso y errores guardados? La clave se mantiene.')) return;
+  D.stats = {}; D.notes = []; persist(); updateHome(); toast('Progreso borrado.');
+};
+
+/* ============ Inicio de la app ============ */
+initSettings();
+updateHome();
+renderDictCats();
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
