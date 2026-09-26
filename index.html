@@ -59,6 +59,7 @@
         <select id="persona">
           <option value="lars">Lars · sueco</option>
           <option value="mike">Mike · canadiense</option>
+          <option value="erik">Erik · jefe de proyecto sueco</option>
         </select>
       </label>
       <button class="btn primary wide" id="btnStartTalk">Empezar conversación</button>
@@ -79,6 +80,10 @@
 
   <!-- DICTADO -->
   <section class="view" id="view-dict">
+    <div class="seg" id="dictModes">
+      <button class="on" data-answer="type">⌨ Escribir</button>
+      <button data-answer="voice">🎙 Responder hablando</button>
+    </div>
     <div class="chips" id="dictCats"></div>
     <div class="card-plain">
       <div class="progress-line"><span id="dictCount">1 / 8</span><span id="dictScore"></span></div>
@@ -86,7 +91,10 @@
         <button class="play" id="dictPlay">▶ Escuchar</button>
         <button class="btn ghost" id="dictSlow">🐢 Lento</button>
       </div>
-      <input id="dictInput" type="text" placeholder="Escribe lo que escuchas" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div class="composer-row">
+        <input id="dictInput" type="text" placeholder="Escribe lo que escuchas" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button class="mic" id="dictMic" aria-label="Repetir en voz alta" hidden>🎙</button>
+      </div>
       <div class="row-btns">
         <button class="btn primary" id="dictCheck">Revisar</button>
         <button class="btn ghost" id="dictNext">Siguiente</button>
@@ -98,6 +106,10 @@
 
   <!-- DELETREO -->
   <section class="view" id="view-spell">
+    <div class="seg" id="spellAnswer">
+      <button class="on" data-answer="type">⌨ Escribir</button>
+      <button data-answer="voice">🎙 Responder hablando</button>
+    </div>
     <div class="chips" id="spellModes">
       <button class="chip on" data-mode="words">Palabras técnicas</button>
       <button class="chip" data-mode="codes">Códigos</button>
@@ -151,6 +163,9 @@
           <button class="btn ghost small" id="btnModels">Buscar modelos</button>
         </div>
       </label>
+      <label>Modelo de respaldo (se usa solo si el principal está saturado)
+        <select id="backupModel"></select>
+      </label>
       <button class="btn" id="btnTestKey">Probar conexión</button>
       <p class="muted small" id="keyStatus"></p>
     </div>
@@ -159,9 +174,12 @@
     <div class="card-plain">
       <label>Tu nivel
         <select id="level">
+          <option value="A1">Principiante (A1)</option>
           <option value="A2">Básico (A2)</option>
           <option value="B1">Intermedio (B1)</option>
           <option value="B2">Intermedio alto (B2)</option>
+          <option value="C1">Avanzado (C1)</option>
+          <option value="C2">Casi nativo (C2)</option>
         </select>
       </label>
       <label>Meta diaria
@@ -175,15 +193,39 @@
       <label class="check"><input type="checkbox" id="autoSpeak"> Leer en voz alta las respuestas del técnico</label>
     </div>
 
-    <h2 class="section-title">Voz</h2>
+    <h2 class="section-title">Voces</h2>
     <div class="card-plain">
-      <label>Voz en inglés
-        <select id="voice"></select>
+      <p class="muted small">Elige una voz para cada técnico y pruébala con ▶. Las voces marcadas con ♂ parecen masculinas.</p>
+      <label>Lars (técnico sueco)
+        <div class="composer-row"><select class="voice-sel" data-role="lars"></select><button class="btn ghost small" data-test="lars">▶</button></div>
+      </label>
+      <label>Mike (técnico canadiense)
+        <div class="composer-row"><select class="voice-sel" data-role="mike"></select><button class="btn ghost small" data-test="mike">▶</button></div>
+      </label>
+      <label>Erik (jefe de proyecto)
+        <div class="composer-row"><select class="voice-sel" data-role="erik"></select><button class="btn ghost small" data-test="erik">▶</button></div>
+      </label>
+      <label>Dictado y deletreo
+        <div class="composer-row"><select class="voice-sel" data-role="narrator"></select><button class="btn ghost small" data-test="narrator">▶</button></div>
+      </label>
+      <label>Tono de los técnicos <span id="pitchVal"></span> (más bajo = voz más grave)
+        <input type="range" id="pitch" min="0.5" max="1.2" step="0.05">
       </label>
       <label>Velocidad normal <span id="rateVal"></span>
         <input type="range" id="rate" min="0.6" max="1.2" step="0.05">
       </label>
-      <button class="btn ghost" id="btnTestVoice">Probar voz</button>
+      <details class="help">
+        <summary>¿No aparecen voces de hombre?</summary>
+        <p>En muchos Android, Chrome usa la voz que está configurada en el sistema. Para cambiarla:</p>
+        <ol>
+          <li>Ajustes de Android → Accesibilidad → <b>Salida de texto a voz</b> (en algunos teléfonos está en Sistema → Idioma).</li>
+          <li>Motor preferido: <b>Servicios de voz de Google</b>. Toca el ⚙ junto a él.</li>
+          <li><b>Instalar datos de voz</b> → English (United States) y English (United Kingdom).</li>
+          <li>Prueba las voces con ▶ y deja seleccionada una de hombre.</li>
+          <li>Cierra la app por completo y ábrela otra vez.</li>
+        </ol>
+        <p>Además, bajar el <b>tono</b> hace que cualquier voz suene más grave.</p>
+      </details>
     </div>
 
     <h2 class="section-title">Tus datos</h2>

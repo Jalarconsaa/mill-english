@@ -80,18 +80,139 @@ const NATO = {
 };
 const DIGIT_WORDS = ["zero","one","two","three","four","five","six","seven","eight","nine"];
 
-// Escenarios de conversación
+// Nuevas áreas del aserradero y supervisión
+Object.assign(PHRASES, {
+  recepcion: [
+    ["The log trucks start arriving at six in the morning.", "Los camiones con rollizos empiezan a llegar a las seis de la mañana."],
+    ["We measure the diameter and length of every log.", "Medimos el diámetro y el largo de cada rollizo."],
+    ["These logs are too crooked for the main line.", "Estos rollizos están demasiado torcidos para la línea principal."],
+    ["Please sort the logs by diameter in the log yard.", "Por favor clasifica los rollizos por diámetro en la cancha."],
+    ["The loader puts the logs on the infeed deck.", "El cargador pone los rollizos en la mesa de alimentación."],
+    ["The metal detector found a nail in this log.", "El detector de metales encontró un clavo en este rollizo."],
+    ["We keep the log piles wet in summer so they don't crack.", "Mantenemos mojadas las pilas de rollizos en verano para que no se partan."]
+  ],
+  descortezador: [
+    ["The debarker is not removing all the bark.", "El descortezador no está sacando toda la corteza."],
+    ["The tips on the debarker arms are worn.", "Las puntas de los brazos del descortezador están gastadas."],
+    ["Big logs sometimes get stuck in the debarker.", "Los rollizos grandes a veces se atascan en el descortezador."],
+    ["Too much pressure damages the wood surface.", "Demasiada presión daña la superficie de la madera."],
+    ["The bark goes on a conveyor to the boiler.", "La corteza va por un transportador a la caldera."],
+    ["Check the rotor speed before you start the line.", "Revisa la velocidad del rotor antes de partir la línea."]
+  ],
+  resierra: [
+    ["The resaw splits the thick pieces into thinner boards.", "La resierra divide las piezas gruesas en tablas más delgadas."],
+    ["The boards from the resaw have uneven thickness.", "Las tablas de la resierra tienen espesor disparejo."],
+    ["We change the resaw band every four hours.", "Cambiamos la huincha de la resierra cada cuatro horas."],
+    ["Feed the pieces straight into the resaw.", "Alimenta las piezas derechas a la resierra."],
+    ["The guide rollers on the resaw need adjustment.", "Los rodillos guía de la resierra necesitan ajuste."],
+    ["The saw is wandering. Check the tension and the guides.", "La sierra se está desviando. Revisa la tensión y las guías."]
+  ],
+  trimmer: [
+    ["The trimmer cuts the boards to the correct length.", "El trimmer corta las tablas al largo correcto."],
+    ["Some trimmer saws are not dropping.", "Algunas sierras del trimmer no están bajando."],
+    ["The optimizer chose the wrong length for this board.", "El optimizador eligió el largo equivocado para esta tabla."],
+    ["We are losing too much wood at the trimmer.", "Estamos perdiendo demasiada madera en el trimmer."],
+    ["The grader marks the defects before the trimmer.", "El clasificador marca los defectos antes del trimmer."],
+    ["The boards are not square to the saws.", "Las tablas no llegan a escuadra con las sierras."]
+  ],
+  buzones: [
+    ["The sorter drops each board into the correct bin.", "La clasificadora deja caer cada tabla en el buzón correcto."],
+    ["Bin number twelve is full. Please empty it.", "El buzón número doce está lleno. Por favor vacíalo."],
+    ["Two different lengths are falling into the same bin.", "Dos largos distintos están cayendo en el mismo buzón."],
+    ["The bin gate is stuck open.", "La compuerta del buzón está pegada abierta."],
+    ["We need to reassign the bins for the new order.", "Tenemos que reasignar los buzones para el nuevo pedido."],
+    ["Boards are falling outside the bins.", "Las tablas están cayendo fuera de los buzones."]
+  ],
+  stacker: [
+    ["The stacker builds the packages layer by layer.", "El stacker arma los paquetes capa por capa."],
+    ["The stickers are not aligned in the package.", "Los separadores no están alineados en el paquete."],
+    ["The stacker forks are jamming.", "Las horquillas del stacker se están atascando."],
+    ["Each package has twenty two layers.", "Cada paquete tiene veintidós capas."],
+    ["The sticker magazine is almost empty.", "El cargador de separadores está casi vacío."],
+    ["The package is not square. Please check the stacker.", "El paquete no está cuadrado. Por favor revisa el stacker."]
+  ],
+  enzunchado: [
+    ["The strapping machine puts four straps on each package.", "La enzunchadora pone cuatro zunchos en cada paquete."],
+    ["The strap broke during tensioning.", "El zuncho se cortó al tensar."],
+    ["We are running out of strap. Bring a new coil.", "Se nos está acabando el zuncho. Trae un rollo nuevo."],
+    ["Put the corner protectors on before strapping.", "Pon los esquineros antes de enzunchar."],
+    ["The strapping head is not sealing the strap.", "El cabezal de la enzunchadora no está sellando el zuncho."],
+    ["Put the label on after strapping the package.", "Pon la etiqueta después de enzunchar el paquete."]
+  ],
+  antimancha: [
+    ["The boards go through the anti sapstain dip to prevent blue stain.", "Las tablas pasan por el baño antimancha para evitar la mancha azul."],
+    ["Check the chemical concentration in the tank every shift.", "Revisa la concentración del químico en el estanque cada turno."],
+    ["Always wear gloves and goggles near the dip tank.", "Usa siempre guantes y antiparras cerca del estanque de baño."],
+    ["The sprayers are clogged. Clean the nozzles.", "Los aspersores están tapados. Limpia las boquillas."],
+    ["Let the treated wood drip before stacking.", "Deja escurrir la madera tratada antes de apilar."],
+    ["Green lumber must be treated soon after sawing.", "La madera verde debe tratarse poco después de aserrarla."]
+  ],
+  pintado: [
+    ["We paint the ends of the packages with the client's color.", "Pintamos las cabezas de los paquetes con el color del cliente."],
+    ["The end coating helps prevent cracks in the boards.", "El sellador en las cabezas ayuda a evitar grietas en las tablas."],
+    ["Use the blue paint for the export order.", "Usa la pintura azul para el pedido de exportación."],
+    ["The spray nozzles need cleaning every day.", "Las boquillas de pintura necesitan limpieza todos los días."],
+    ["The marking on this package is wrong.", "El marcado de este paquete está malo."],
+    ["Let the paint dry before loading the truck.", "Deja secar la pintura antes de cargar el camión."]
+  ],
+  supervision: [
+    ["Let's review yesterday's production and downtime.", "Revisemos la producción y el tiempo detenido de ayer."],
+    ["Our lumber recovery was below target this week.", "Nuestro rendimiento de madera estuvo bajo la meta esta semana."],
+    ["We need to plan the shutdown for next month.", "Tenemos que planificar la detención del próximo mes."],
+    ["Who is responsible for this action item?", "¿Quién es responsable de esta tarea?"],
+    ["The incident report must be sent today.", "El informe del incidente debe enviarse hoy."],
+    ["What is the lead time for this spare part?", "¿Cuál es el plazo de entrega de este repuesto?"],
+    ["Can we schedule a meeting with your engineering team?", "¿Podemos agendar una reunión con su equipo de ingeniería?"],
+    ["We need to improve the uptime of this line.", "Tenemos que mejorar la disponibilidad de esta línea."],
+    ["Please send me the quote before Friday.", "Por favor envíame la cotización antes del viernes."],
+    ["I will follow up with the maintenance team.", "Voy a hacer seguimiento con el equipo de mantención."]
+  ]
+});
+Object.assign(CATEGORY_NAMES, {
+  recepcion: "Recepción de rollizos", descortezador: "Descortezador", resierra: "Resierra",
+  trimmer: "Trimmer", buzones: "Buzones", stacker: "Stacker", enzunchado: "Enzunchado",
+  antimancha: "Baño antimancha", pintado: "Pintado", supervision: "Supervisión y jefatura"
+});
+WORDS.push(
+  ["bark","corteza"],["rotor","rotor"],["resaw","resierra"],["optimizer","optimizador"],["grader","clasificador"],
+  ["bin","buzón"],["gate","compuerta"],["sticker","separador"],["package","paquete"],["layer","capa"],
+  ["strap","zuncho"],["coil","rollo"],["label","etiqueta"],["sapstain","mancha azul"],["chemical","químico"],
+  ["concentration","concentración"],["nozzle","boquilla"],["paint","pintura"],["coating","recubrimiento"],
+  ["crooked","torcido"],["diameter","diámetro"],["loader","cargador"],["truck","camión"],["recovery","rendimiento"],
+  ["target","meta"],["shutdown","detención"],["report","informe"],["meeting","reunión"],["quote","cotización"],
+  ["budget","presupuesto"],["uptime","disponibilidad"],["incident","incidente"],["supervisor","supervisor"],["deadline","plazo"]
+);
+
+// Escenarios de conversación (group = grupo en el menú)
 const SCENARIOS = [
-  { id:"arrival", es:"Recibir al técnico", en:"You just arrived at the sawmill in Chile. The learner is meeting you at the gate to welcome you and take you to the office." },
-  { id:"breakdown", es:"Explicar una falla", en:"A machine on the production line (the learner decides which one) has a problem. You ask the learner detailed questions to understand the failure: when it started, symptoms, error codes, noises." },
-  { id:"instructions", es:"Recibir instrucciones", en:"You are explaining to the learner a maintenance procedure step by step (for example changing saw blades or adjusting a sensor). Check that the learner understands and make them confirm or ask questions." },
-  { id:"safety", es:"Seguridad en planta", en:"You are doing a safety walk through the mill with the learner. Talk about lockout/tagout, guards, PPE and risky areas." },
-  { id:"parts", es:"Pedir repuestos", en:"You need to order spare parts. Ask the learner for part numbers, quantities and serial numbers, and make them spell codes." },
-  { id:"lunch", es:"Colación y charla", en:"You are having lunch with the learner in the mill canteen. Casual small talk: family, Chile, food, weather, weekend, your home country." },
-  { id:"report", es:"Reporte de turno", en:"At the end of the shift, you ask the learner for a report: production numbers, downtime, problems and what needs to be done tomorrow." }
+  { group:"Situaciones", id:"arrival", es:"Recibir al técnico", en:"You just arrived at the sawmill in Chile. The learner is meeting you at the gate to welcome you and take you to the office." },
+  { group:"Situaciones", id:"breakdown", es:"Explicar una falla", en:"A machine on the production line (the learner decides which one) has a problem. You ask detailed questions to understand the failure: when it started, symptoms, error codes, noises." },
+  { group:"Situaciones", id:"instructions", es:"Recibir instrucciones", en:"You are explaining a maintenance procedure step by step (for example changing saw blades or adjusting a sensor). Check that the learner understands and make them confirm or ask questions." },
+  { group:"Situaciones", id:"safety", es:"Seguridad en planta", en:"You are doing a safety walk through the mill with the learner. Talk about lockout/tagout, guards, PPE and risky areas." },
+  { group:"Situaciones", id:"parts", es:"Pedir repuestos", en:"You need to order spare parts. Ask the learner for part numbers, quantities and serial numbers, and make them spell codes." },
+  { group:"Situaciones", id:"lunch", es:"Colación y charla", en:"You are having lunch with the learner in the mill canteen. Casual small talk: family, Chile, food, weather, weekend, your home country." },
+  { group:"Situaciones", id:"report", es:"Reporte de turno", en:"At the end of the shift, you ask the learner for a report: production numbers, downtime, problems and what needs to be done tomorrow." },
+
+  { group:"Equipos", id:"yard", es:"Recepción de rollizos", en:"You are at the log yard and log receiving area with the learner: log trucks, measuring diameter and length, sorting logs, loaders, infeed deck, metal detector, rejected logs." },
+  { group:"Equipos", id:"debarker", es:"Descortezador", en:"You are checking the ring debarker with the learner: bark not fully removed, worn tips, arm pressure, rotor speed, logs getting stuck, bark conveyor." },
+  { group:"Equipos", id:"resaw", es:"Resierra", en:"You are working on the resaw with the learner: uneven thickness, band saw changes, tension, guide rollers, feed speed, saw deviation." },
+  { group:"Equipos", id:"trimmer", es:"Trimmer", en:"You are at the trimmer with the learner: saws not dropping, optimizer choosing wrong lengths, wood loss, board positioning, grader marks." },
+  { group:"Equipos", id:"bins", es:"Buzones (clasificación)", en:"You are at the sorter bins with the learner: boards in the wrong bin, full bins, stuck gates, reassigning bins for a new order." },
+  { group:"Equipos", id:"stacker", es:"Stacker", en:"You are at the stacker with the learner: package layers, sticker alignment, sticker magazine, forks jamming, packages not square." },
+  { group:"Equipos", id:"strapping", es:"Enzunchado", en:"You are at the strapping machine with the learner: number of straps, strap breaking, sealing head problems, corner protectors, labels." },
+  { group:"Equipos", id:"dip", es:"Baño antimancha", en:"You are at the anti-sapstain treatment (dip tank or spray) with the learner: chemical concentration, blue stain prevention, clogged nozzles, dripping, safety with chemicals." },
+  { group:"Equipos", id:"painting", es:"Pintado de madera", en:"You are at the package end-painting and marking station with the learner: client colors, end coating to prevent cracks, spray nozzles, wrong marking, drying time." },
+
+  { group:"Supervisión y jefatura", id:"prodmeeting", es:"Reunión de producción", en:"You are in a production meeting with the learner, who is a supervisor. Review production, downtime, lumber recovery vs target, main problems and action items." },
+  { group:"Supervisión y jefatura", id:"vendor", es:"Reunión con el proveedor", en:"The learner is a sawmill manager meeting you, the machinery supplier's representative. Discuss a performance problem, warranty, quotes, lead times and next steps. Be polite but negotiate." },
+  { group:"Supervisión y jefatura", id:"shutdown", es:"Planificar detención", en:"You and the learner (a supervisor) plan a maintenance shutdown: dates, duration, tasks, contractors, spare parts, safety and who is responsible for each task." },
+  { group:"Supervisión y jefatura", id:"incident", es:"Informe de incidente", en:"There was a safety incident at the mill. You ask the learner (a supervisor) what happened, when, who was involved, root cause and corrective actions." },
+  { group:"Supervisión y jefatura", id:"handover", es:"Entrega de turno", en:"The learner is a shift supervisor handing over the shift to you: production, pending problems, machines down, safety issues and priorities." },
+  { group:"Supervisión y jefatura", id:"training", es:"Capacitar a operadores", en:"The learner is a supervisor and asks you to help plan training for the operators on a new machine: topics, schedule, language barriers, checking understanding." }
 ];
 
 const PERSONAS = {
-  lars: { name:"Lars", es:"Lars, técnico sueco", en:"Lars, a friendly Swedish service technician from a sawmill machinery company. You speak clear international English (it is your second language), sometimes a little direct." },
-  mike: { name:"Mike", es:"Mike, técnico canadiense", en:"Mike, a relaxed Canadian service technician from British Columbia. You speak natural North American English, with casual everyday expressions." }
+  lars: { name:"Lars", es:"Lars, técnico sueco", en:"Lars, a friendly Swedish service technician (a man) from a sawmill machinery company. You speak clear international English (it is your second language), sometimes a little direct." },
+  mike: { name:"Mike", es:"Mike, técnico canadiense", en:"Mike, a relaxed Canadian service technician (a man) from British Columbia. You speak natural North American English, with casual everyday expressions." },
+  erik: { name:"Erik", es:"Erik, jefe de proyecto sueco", en:"Erik, a Swedish project manager (a man) from the machinery supplier. Professional, organized, focused on results, deadlines and costs. Clear international English." }
 };

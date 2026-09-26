@@ -15,7 +15,9 @@ function persist() {
   catch (e) { console.warn('No se pudo guardar', e); }
 }
 const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
-  autoSend: true, autoSpeak: true, voice: '', rate: 0.95 });
+  autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.5-flash-lite',
+  voices: { lars: '', mike: '', erik: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type' });
+if (!S.voices) S.voices = { lars: '', mike: '', erik: '', narrator: '' };
 const D = load('me_data', { stats: {}, notes: [] });
 
 function dayKey(d = new Date()) {
@@ -67,26 +69,48 @@ $$('.routine li').forEach(li => li.addEventListener('click', () => show(li.datas
 
 /* ============ Voz: hablar (TTS) ============ */
 let voices = [];
+// Heurística para detectar voces masculinas (los nombres varían según el teléfono)
+const MALE_RX = /(^|[^a-z])(male|man|guy)([^a-z]|$)|daniel|david|mark|george|james|fred|alex|thomas|oliver|arthur|aaron|ryan|guy|iol|iom|tpd|rjs|gbd|gbg|gbc|male-/i;
+const FEMALE_RX = /female|woman|girl|samantha|karen|victoria|susan|zira|hazel|kate|serena|moira|tessa|fiona|libby|sonia|jenny|aria|iob|iog|sfg|tpf|tpc|gba|gbb|fis/i;
+const isMale = v => MALE_RX.test(v.name) && !FEMALE_RX.test(v.name);
+const ROLE_LANGS = { lars: ['en-GB', 'en-US'], mike: ['en-CA', 'en-US'], erik: ['en-GB', 'en-US'], narrator: ['en-US', 'en-GB'] };
+function normLang(l) { return l.replace('_', '-'); }
+function autoVoice(role) {
+  const langs = ROLE_LANGS[role] || ['en-US'];
+  const byLang = l => voices.filter(v => normLang(v.lang).toLowerCase() === l.toLowerCase());
+  const wantMale = role !== 'narrator';
+  for (const l of langs) { const m = byLang(l).filter(isMale); if (wantMale && m.length) return m[0]; }
+  if (wantMale) { const m = voices.filter(isMale); if (m.length) return m[0]; }
+  for (const l of langs) { const any = byLang(l); if (any.length) return any[0]; }
+  return voices[0];
+}
+function voiceFor(role) {
+  const name = S.voices[role];
+  return voices.find(v => v.name === name) || autoVoice(role);
+}
 function loadVoices() {
   voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('en'));
-  const sel = $('#voice');
-  sel.innerHTML = voices.length ? '' : '<option value="">Voz predeterminada</option>';
-  const pref = ['en-US', 'en-CA', 'en-GB'];
-  voices.sort((a, b) => (pref.indexOf(a.lang.replace('_', '-')) + 10 * !pref.includes(a.lang.replace('_', '-'))) -
-                        (pref.indexOf(b.lang.replace('_', '-')) + 10 * !pref.includes(b.lang.replace('_', '-'))));
-  voices.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); });
-  if (S.voice && voices.some(v => v.name === S.voice)) sel.value = S.voice;
+  const sorted = voices.slice().sort((a, b) => (isMale(b) - isMale(a)) || normLang(a.lang).localeCompare(normLang(b.lang)) || a.name.localeCompare(b.name));
+  $$('.voice-sel').forEach(sel => {
+    const role = sel.dataset.role;
+    const auto = voices.length ? autoVoice(role) : null;
+    sel.innerHTML = `<option value="">Automática${auto ? ' (' + esc(auto.name) + ')' : ''}</option>` +
+      sorted.map(v => `<option value="${esc(v.name)}">${isMale(v) ? '♂ ' : ''}${esc(v.name)} (${esc(normLang(v.lang))})</option>`).join('');
+    sel.value = voices.some(v => v.name === S.voices[role]) ? S.voices[role] : '';
+  });
 }
 if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
-function speak(text, rate = S.rate) {
+// role: 'lars' | 'mike' | 'erik' | 'narrator'
+function speak(text, rate = S.rate, role = 'narrator') {
   return new Promise(res => {
     if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return res(); }
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    const v = voices.find(v => v.name === S.voice) || voices[0];
+    const v = voiceFor(role);
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
-    u.rate = rate; u.onend = res; u.onerror = res;
+    u.rate = rate; u.pitch = role === 'narrator' ? 1 : S.pitch;
+    u.onend = res; u.onerror = res;
     speechSynthesis.speak(u);
   });
 }
@@ -133,9 +157,8 @@ function listen({ onInterim, onFinal, button }) {
 }
 
 /* ============ IA (Google Gemini, plan gratuito) ============ */
-async function gemini(system, contents, temperature = 0.8) {
-  if (!S.apiKey) throw new Error('NOKEY');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.model)}:generateContent`;
+async function callModel(model, system, contents, temperature) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': S.apiKey },
@@ -151,8 +174,34 @@ async function gemini(system, contents, temperature = 0.8) {
   }
   const data = await res.json();
   const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
-  if (!text) throw new Error('La IA no devolvió respuesta. Intenta de nuevo.');
+  if (!text) { const err = new Error('La IA no devolvió respuesta.'); err.status = 500; throw err; }
   return parseJSON(text);
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+let fallbackNotified = '';
+// Prueba el modelo principal; si Google está saturado (503) reintenta y luego usa el modelo de respaldo.
+async function gemini(system, contents, temperature = 0.8) {
+  if (!S.apiKey) throw new Error('NOKEY');
+  const chain = [...new Set([S.model, S.backupModel, 'gemini-2.5-flash'].filter(Boolean))];
+  let lastErr;
+  for (const model of chain) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await callModel(model, system, contents, temperature);
+        if (model !== S.model && fallbackNotified !== model) {
+          fallbackNotified = model;
+          toast(`${S.model} está saturado. Usando respaldo: ${model}`, 3500);
+        }
+        return r;
+      } catch (e) {
+        lastErr = e;
+        if (e.status === 503 || e.status === 500 || e.status === 504) { if (attempt === 0) { await wait(1500); continue; } break; }
+        if (e.status === 429 || e.status === 404) break;   // probar el siguiente modelo
+        throw e;                                            // clave inválida, sin internet, etc.
+      }
+    }
+  }
+  throw lastErr;
 }
 function parseJSON(text) {
   const clean = text.replace(/```json|```/g, '').trim();
@@ -161,6 +210,7 @@ function parseJSON(text) {
 }
 function aiErrorMsg(e) {
   if (e.message === 'NOKEY') return 'Primero configura tu clave gratuita de Gemini en Ajustes.';
+  if (e.status === 503 || e.status === 500 || e.status === 504) return 'Los servidores de Google están saturados en este momento, incluso el modelo de respaldo. Espera un par de minutos o cambia de modelo en Ajustes.';
   if (e.status === 429) return 'Llegaste al límite gratuito por minuto o por día. Espera un momento y reintenta.';
   if (e.status === 400 && /api key/i.test(e.message)) return 'La clave no es válida. Revísala en Ajustes.';
   if (e.status === 403) return 'La clave no tiene permiso. Crea una nueva en Google AI Studio.';
@@ -231,11 +281,31 @@ function addNote({ original, corrected, explanation, type, sentence, source }) {
 /* ============ Conversación ============ */
 const talk = { history: [], active: false, busy: false };
 const LEVEL_NOTES = {
+  A1: 'The learner is a beginner. Use very simple, common words, very short sentences (maximum 8 words), mostly present tense. Ask simple yes/no or either/or questions.',
   A2: 'Use simple vocabulary and short sentences. Speak slowly and clearly. Avoid idioms.',
   B1: 'Use everyday vocabulary with some technical sawmill terms and a few common phrasal verbs.',
-  B2: 'Speak naturally, with idioms and phrasal verbs common at work, like a real technician would.'
+  B2: 'Speak naturally, with idioms and phrasal verbs common at work, like a real technician would.',
+  C1: 'Speak like a native professional at normal speed: idioms, phrasal verbs, contractions, indirect and polite business language.',
+  C2: 'Speak exactly like a native speaker: slang, idioms, humor, fast natural phrasing and cultural references.'
 };
-SCENARIOS.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; $('#scenario').appendChild(o); });
+const STRICTNESS = {
+  A1: 'Correct only the most important error (maximum 1-2). Be very encouraging.',
+  A2: 'Correct only clear grammar and vocabulary errors. Be encouraging.',
+  B1: 'Correct grammar, vocabulary and clearly unnatural phrases.',
+  B2: 'Correct all errors, plus phrases that are correct but not natural.',
+  C1: 'Be demanding: correct subtle errors, unnatural collocations, wrong register and tone.',
+  C2: 'Be very demanding, like a native editor: flag anything a native speaker would not say, including subtle word choice, rhythm and register.'
+};
+[...new Set(SCENARIOS.map(s => s.group))].forEach(g => {
+  const og = document.createElement('optgroup'); og.label = g;
+  SCENARIOS.filter(s => s.group === g).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; og.appendChild(o); });
+  $('#scenario').appendChild(og);
+});
+// Sugerir a Erik para temas de jefatura
+$('#scenario').addEventListener('change', () => {
+  const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
+  if (sc.group === 'Supervisión y jefatura' && $('#persona').value !== 'erik') $('#persona').value = 'erik';
+});
 
 function talkSystem() {
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value), p = PERSONAS[$('#persona').value];
@@ -252,6 +322,7 @@ RULES FOR YOUR REPLY:
 RULES FOR FEEDBACK about the learner's LAST message:
 - The learner's text comes from speech recognition: ignore punctuation, capitalization and obvious transcription glitches. Focus on grammar, word choice, missing words, word order and phrases that sound unnatural.
 - List only real mistakes, maximum 4, the most important first. If the message is correct, return an empty corrections list.
+- Feedback level: ${STRICTNESS[S.level]}
 - Explanations in simple Spanish (Chile), maximum 20 words each.
 - If the learner writes in Spanish or mixes Spanish, put the English version in "natural" and in praise_es encourage them to say it in English.
 - If the learner's message is "[START]", give no feedback and just open the conversation in character.
@@ -276,10 +347,12 @@ function addAIMsg(reply, replyEs) {
   const div = chatAdd(`<div class="who">${esc(name)}</div><div>${esc(reply)}</div>
     <div class="es" hidden>${esc(replyEs)}</div>
     <div class="tools"><button data-a="speak">🔊 Escuchar</button><button data-a="slow">🐢 Lento</button><button data-a="es">Traducir</button></div>`, 'msg ai');
-  div.querySelector('[data-a=speak]').onclick = () => speak(reply);
-  div.querySelector('[data-a=slow]').onclick = () => speak(reply, 0.7);
+  const role = $('#persona').value;
+  if (S.level === 'A1') div.querySelector('.es').hidden = false;
+  div.querySelector('[data-a=speak]').onclick = () => speak(reply, S.rate, role);
+  div.querySelector('[data-a=slow]').onclick = () => speak(reply, 0.7, role);
   div.querySelector('[data-a=es]').onclick = () => { const e = div.querySelector('.es'); e.hidden = !e.hidden; };
-  if (S.autoSpeak) speak(reply);
+  if (S.autoSpeak) speak(reply, S.rate, role);
 }
 function addFeedback(r, said) {
   const cs = Array.isArray(r.corrections) ? r.corrections : [];
@@ -294,7 +367,7 @@ function addFeedback(r, said) {
     html += `<div class="fix">Más natural: <span class="natural">${esc(r.natural)}</span> <button class="btn ghost small" data-a="nat">🔊</button></div>`;
   }
   const div = chatAdd(html, 'feedback' + (perfect ? '' : ' has-errors'));
-  const nb = div.querySelector('[data-a=nat]'); if (nb) nb.onclick = () => speak(r.natural);
+  const nb = div.querySelector('[data-a=nat]'); if (nb) nb.onclick = () => speak(r.natural, S.rate, 'narrator');
 }
 
 async function talkCall(userText) {
@@ -417,11 +490,15 @@ function loadDict(cat) {
     }).filter(it => it.en && !seen.has(it.en) && seen.add(it.en)).slice(0, 8);
     if (!dict.items.length) { toast('Aún no tienes errores guardados.'); return loadDict('seguridad'); }
   } else if (cat === 'ia') dict.items = dict.aiItems.slice();
-  else dict.items = shuffle(PHRASES[cat]).slice(0, 8).map(([en, es]) => ({ en, es }));
+  else {
+    let pool = PHRASES[cat];
+    if (S.level === 'A1') { const short = pool.filter(([en]) => en.split(' ').length <= 8); if (short.length >= 4) pool = short; }
+    dict.items = shuffle(pool).slice(0, 8).map(([en, es]) => ({ en, es }));
+  }
   dict.idx = 0; dict.total = 0; renderDictCats(); showDictItem();
 }
 function showDictItem() {
-  dict.checked = false;
+  dict.checked = false; dict.scored = false;
   $('#dictInput').value = ''; $('#dictResult').innerHTML = '';
   $('#dictCount').textContent = `${dict.idx + 1} / ${dict.items.length}`;
   $('#dictScore').textContent = dict.idx ? `Promedio ${Math.round(dict.total / dict.idx * 100)}%` : '';
@@ -433,15 +510,22 @@ $('#dictSlow').onclick = () => curDict() && speak(curDict().en, 0.65);
 function checkDict() {
   if (!curDict()) return loadDict(dict.cat);
   if (dict.checked) return nextDict();
+  const voice = S.dictAnswer === 'voice';
   const typed = $('#dictInput').value.trim();
-  if (!typed) { toast('Escucha y escribe la frase primero.'); return; }
+  if (!typed) { toast(voice ? 'Escucha la frase, toca 🎙 y repítela.' : 'Escucha y escribe la frase primero.'); return; }
   const it = curDict(), { ops, score } = diffWords(it.en, typed);
-  dict.checked = true; dict.total += score; bump('dict');
+  dict.checked = true; if (!dict.scored) { dict.scored = true; dict.total += score; bump('dict'); }
   const pct = Math.round(score * 100);
-  $('#dictResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 70 ? 'var(--hivis)' : 'var(--bad)'}">${pct === 100 ? 'Perfecto' : pct + '% correcto'}</div>
-    <div class="line">${renderOps(ops)}</div><div class="es">${esc(it.es)}</div>`;
+  const label = pct === 100 ? (voice ? '¡Se te entendió todo!' : 'Perfecto') : voice ? `Se entendió el ${pct}%` : pct + '% correcto';
+  $('#dictResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 70 ? 'var(--hivis)' : 'var(--bad)'}">${label}</div>
+    <div class="line">${renderOps(ops)}</div>
+    ${voice ? `<div class="heard">El teléfono escuchó: "${esc(typed)}"</div>` : ''}
+    <div class="es">${esc(it.es)}</div>
+    ${voice && pct < 100 ? '<p class="muted small">Las palabras marcadas no se entendieron: escúchalas de nuevo en lento y repite.</p>' : ''}`;
   ops.filter(o => o.t === 'sub' && o.b.length > 1).forEach(o =>
-    addNote({ original: o.b, corrected: o.a, explanation: 'Escuchaste mal o escribiste mal esta palabra.', type: 'spelling', sentence: it.en, source: 'Dictado' }));
+    addNote(voice
+      ? { original: o.b, corrected: o.a, explanation: 'Pronunciación: el teléfono entendió otra palabra. Escúchala y repítela.', type: 'pronunciation', sentence: it.en, source: 'Dictado hablado' }
+      : { original: o.b, corrected: o.a, explanation: 'Escuchaste mal o escribiste mal esta palabra.', type: 'spelling', sentence: it.en, source: 'Dictado' }));
   $('#dictNext').textContent = dict.idx + 1 < dict.items.length ? 'Siguiente' : 'Terminar';
 }
 function nextDict() {
@@ -455,12 +539,28 @@ function nextDict() {
   dict.idx++; showDictItem(); speak(curDict().en);
 }
 $('#dictCheck').onclick = checkDict;
+function applyDictMode() {
+  const voice = S.dictAnswer === 'voice';
+  $$('#dictModes button').forEach(b => b.classList.toggle('on', b.dataset.answer === S.dictAnswer));
+  $('#dictMic').hidden = !voice;
+  $('#dictInput').readOnly = voice;
+  $('#dictInput').placeholder = voice ? 'Toca 🎙 y repite la frase' : 'Escribe lo que escuchas';
+  $('#dictCheck').hidden = voice;
+}
+$$('#dictModes button').forEach(b => b.onclick = () => { S.dictAnswer = b.dataset.answer; persist(); applyDictMode(); if (dict.items.length) showDictItem(); });
+$('#dictMic').onclick = () => listen({ button: $('#dictMic'),
+  onInterim: t => { $('#dictInput').value = t; },
+  onFinal: t => { $('#dictInput').value = t; dict.checked = false; checkDict(); } });
 $('#dictNext').onclick = nextDict;
 $('#dictInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkDict(); } });
 $('#dictAI').onclick = async () => {
   const btn = $('#dictAI'); btn.disabled = true; btn.textContent = 'Generando…';
   const weak = D.notes.filter(n => n.type === 'spelling').slice(-12).map(n => n.corrected).join(', ');
-  const topic = CATEGORY_NAMES[dict.cat] && !['errores', 'ia'].includes(dict.cat) ? dict.cat : 'mixed sawmill topics';
+  const TOPIC_EN = { seguridad: 'safety', mantenimiento: 'maintenance', produccion: 'production', fallas: 'breakdowns and troubleshooting',
+    social: 'small talk with visiting technicians', recepcion: 'log yard and log receiving', descortezador: 'ring debarker', resierra: 'resaw',
+    trimmer: 'trimmer and optimizer', buzones: 'sorter bins', stacker: 'stacker and stickers', enzunchado: 'package strapping',
+    antimancha: 'anti-sapstain dip treatment', pintado: 'package end painting and marking', supervision: 'supervisor and management meetings, KPIs, planning' };
+  const topic = TOPIC_EN[dict.cat] || 'mixed sawmill topics';
   try {
     const r = await gemini(
       `You create listening dictation exercises for a Chilean sawmill worker learning English (CEFR ${S.level}).`,
@@ -480,6 +580,54 @@ const SPELL_HELP = {
   numbers: 'Escucha la cifra y escríbela solo con números. Ojo con thirteen (13) y thirty (30).',
   nato: 'Di el código en voz alta con el alfabeto fonético (ej: "Sierra Kilo two"). Toca 🎙 o escríbelo.'
 };
+const SPELL_HELP_VOICE = {
+  words: 'Escucha la palabra y deletréala en voz alta, letra por letra (ej: "B, E, A, R, I, N, G"). Toca 🎙 y habla sin pausas largas.',
+  codes: 'Lee el código en voz alta, letra por letra, como si se lo dictaras a un técnico por teléfono. Toca 🎙.',
+  numbers: 'Di la cifra en voz alta en inglés (ej: "one thousand four hundred fifty"). Toca 🎙.',
+  nato: SPELL_HELP.nato
+};
+const spellVoice = () => S.spellAnswer === 'voice' || spell.mode === 'nato';
+const showsTarget = () => spell.mode === 'nato' || (S.spellAnswer === 'voice' && (spell.mode === 'codes' || spell.mode === 'numbers'));
+// Nombres de letras como los escribe el reconocimiento de voz
+const LETTER_WORDS = { ay: 'a', bee: 'b', be: 'b', see: 'c', sea: 'c', si: 'c', dee: 'd', de: 'd', ee: 'e', ef: 'f', eff: 'f',
+  gee: 'g', jee: 'g', aitch: 'h', age: 'h', eich: 'h', eye: 'i', aye: 'i', jay: 'j', kay: 'k', el: 'l', ell: 'l', em: 'm', en: 'n',
+  oh: 'o', pee: 'p', pea: 'p', cue: 'q', queue: 'q', are: 'r', ar: 'r', our: 'r', es: 's', ess: 's', tee: 't', tea: 't',
+  you: 'u', vee: 'v', ex: 'x', why: 'y', zee: 'z', zed: 'z' };
+function parseSpelled(text, mode) {
+  let t = text.toLowerCase().replace(/double[\s-]?(u|you)/g, ' w ').replace(/x[\s-]?ray/g, ' xray ')
+    .replace(/\b(dash|hyphen|space|minus)\b/g, ' ').replace(/[^a-z0-9 ]/g, ' ');
+  let out = '';
+  t.split(/\s+/).filter(Boolean).forEach(w => {
+    if (/^[0-9]+$/.test(w)) out += w;
+    else if (mode === 'codes' && DIGIT_REV[w] && !(w.length === 1 && w !== 'o')) out += DIGIT_REV[w];
+    else if (w.length === 1) out += mode === 'codes' && w === 'o' ? '0' : w;
+    else if (LETTER_WORDS[w]) out += LETTER_WORDS[w];
+    else if (NATO_REV[w]) out += NATO_REV[w].toLowerCase();
+    else if (DIGIT_REV[w]) out += DIGIT_REV[w];
+    else out += w;   // a veces el teléfono junta las letras en una palabra
+  });
+  return out;
+}
+// Convierte una cifra dicha en inglés a número ("one thousand four hundred fifty" → 1450)
+function spokenNumber(text) {
+  const t = text.toLowerCase().replace(/,/g, '').trim();
+  const m = t.match(/\d+(\.\d+)?/);
+  if (m) return m[0];
+  const U = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11,
+    twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+    twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  const [intPart, decPart] = t.split(/\bpoint\b/);
+  let total = 0, cur = 0, found = false;
+  intPart.split(/[\s-]+/).forEach(w => {
+    if (w in U) { cur += U[w]; found = true; }
+    else if (w === 'hundred') { cur = (cur || 1) * 100; found = true; }
+    else if (w === 'thousand') { total += (cur || 1) * 1000; cur = 0; found = true; }
+  });
+  if (!found) return t;
+  let res = String(total + cur);
+  if (decPart) res += '.' + decPart.trim().split(/\s+/).map(w => (w in U ? U[w] : '')).join('');
+  return res;
+}
 const CONFUSING = 'AEIGJBVPDKQYRUHW';
 const LETTERS = 'ABCDEFGHIJKLMNPQRSTUVWXYZ' + CONFUSING; // sin O para no confundir con 0
 const rl = () => pick(LETTERS), rd = () => String(Math.floor(Math.random() * 10));
@@ -512,21 +660,25 @@ function charSpeech(ch) {
   return ch.toUpperCase() + '.';
 }
 function newSpell() {
-  spell.checked = false;
+  spell.checked = false; spell.scored = false;
   $('#spellInput').value = ''; $('#spellResult').innerHTML = '';
-  $('#spellHelp').textContent = SPELL_HELP[spell.mode];
-  const isNato = spell.mode === 'nato';
-  $('#spellTarget').hidden = !isNato; $('#spellMic').hidden = !isNato;
-  $('#spellPlay').textContent = isNato ? '▶ Escuchar respuesta' : '▶ Escuchar';
+  const isNato = spell.mode === 'nato', voice = spellVoice(), shown = showsTarget();
+  $$('#spellAnswer button').forEach(b => b.classList.toggle('on', b.dataset.answer === S.spellAnswer));
+  $('#spellAnswer').hidden = isNato;
+  $('#spellHelp').textContent = (voice ? SPELL_HELP_VOICE : SPELL_HELP)[spell.mode];
+  $('#spellTarget').hidden = !shown; $('#spellMic').hidden = !voice;
+  $('#spellPlay').textContent = shown ? '▶ Escuchar respuesta' : '▶ Escuchar';
   $('#spellSlow').hidden = isNato || spell.mode === 'numbers';
   $('#spellSlow').textContent = spell.mode === 'codes' ? '🐢 Más lento' : '🐢 Letra por letra';
-  $('#spellInput').placeholder = isNato ? 'O escribe: Sierra Kilo two…' : spell.mode === 'numbers' ? 'Solo números, ej: 1450' : 'Escribe aquí';
-  $('#spellInput').inputMode = spell.mode === 'numbers' ? 'decimal' : 'text';
+  $('#spellInput').readOnly = voice && !isNato;
+  $('#spellCheck').hidden = voice && !isNato;
+  $('#spellInput').placeholder = isNato ? 'O escribe: Sierra Kilo two…' : voice ? 'Toca 🎙 y habla' : spell.mode === 'numbers' ? 'Solo números, ej: 1450' : 'Escribe aquí';
+  $('#spellInput').inputMode = spell.mode === 'numbers' && !voice ? 'decimal' : 'text';
   if (spell.mode === 'words') { const [en, es] = pick(WORDS); spell.target = { text: en, es }; }
   else if (spell.mode === 'codes') spell.target = { text: makeCode() };
   else if (spell.mode === 'numbers') { const n = makeNumber(); spell.target = { text: n.value, unit: n.unit }; }
   else { let c = ''; const len = 4 + Math.floor(Math.random() * 3); for (let i = 0; i < len; i++) c += Math.random() < 0.7 ? rl() : rd(); spell.target = { text: c }; }
-  $('#spellTarget').textContent = spell.target.text;
+  $('#spellTarget').textContent = spell.target.text + (spell.mode === 'numbers' ? ' ' + spell.target.unit : '');
   $('#spellNext').textContent = 'Saltar';
 }
 function playSpell(slow) {
@@ -570,23 +722,27 @@ function charDiffHTML(target, typed) {
 function checkSpell() {
   if (spell.checked) return newSpellAndPlay();
   const raw = $('#spellInput').value.trim();
-  if (!raw) { toast(spell.mode === 'nato' ? 'Toca 🎙 y di el código.' : 'Escribe tu respuesta primero.'); return; }
+  const voice = spellVoice();
+  if (!raw) { toast(voice ? 'Toca 🎙 y habla.' : 'Escribe tu respuesta primero.'); return; }
   const t = spell.target; let ok = false, html = '';
+  const heardLine = voice && spell.mode !== 'nato' ? `<div class="heard">El teléfono escuchó: "${esc(raw)}"</div>` : '';
   if (spell.mode === 'words') {
-    const typed = raw.toLowerCase();
+    const typed = voice ? parseSpelled(raw, 'words') : raw.toLowerCase();
     ok = typed === t.text;
     html = `<div class="line">${ok ? `<span class="w-ok">${esc(t.text)}</span>` : charDiffHTML(t.text, typed)}</div>
       <div class="es">${esc(t.text)} = ${esc(t.es)} · ${t.text.toUpperCase().split('').join(' ')}</div>`;
     if (!ok) addNote({ original: typed, corrected: t.text, explanation: `Deletreo: ${t.text.toUpperCase().split('').join('-')} (${t.es})`, type: 'spelling', source: 'Deletreo' });
   } else if (spell.mode === 'codes') {
     const clean = s => s.toUpperCase().replace(/[\s-]/g, '');
-    ok = clean(raw) === clean(t.text);
-    html = `<div class="line">${charDiffHTML(clean(t.text), clean(raw))}</div><div class="es">Código: ${esc(t.text)}</div>`;
+    const got = voice ? parseSpelled(raw, 'codes') : raw;
+    ok = clean(got) === clean(t.text);
+    html = `<div class="line">${charDiffHTML(clean(t.text), clean(got))}</div><div class="es">Código: ${esc(t.text)}</div>`;
   } else if (spell.mode === 'numbers') {
     const clean = s => { s = s.replace(/\s/g, ''); s = t.text.includes('.') ? s.replace(',', '.') : s.replace(/[.,]/g, ''); return s.replace(/^0+(?=\d)/, ''); };
-    ok = clean(raw) === t.text;
+    const got = voice ? spokenNumber(raw) : raw;
+    ok = clean(got) === t.text;
     const note = t.text.includes('.') ? '<div class="es">En inglés el decimal se dice "point" y se escribe con punto.</div>' : '';
-    html = `<div class="line">${ok ? `<span class="w-ok">${esc(t.text)}</span>` : `<span class="w-bad">${esc(raw)}</span> <span class="w-fix">${esc(t.text)}</span>`} ${esc(t.unit)}</div>${note}`;
+    html = `<div class="line">${ok ? `<span class="w-ok">${esc(t.text)}</span>` : `<span class="w-bad">${esc(got)}</span> <span class="w-fix">${esc(t.text)}</span>`} ${esc(t.unit)}</div>${note}`;
   } else {
     const heard = parseNato(raw), want = t.text.split('');
     ok = heard.length === want.length && heard.every((h, k) => h.ch === want[k]);
@@ -597,15 +753,18 @@ function checkSpell() {
     }).join('<br>') + '</div>';
     if (heard.length > want.length) html += `<div class="es">Dijiste palabras de más: ${esc(heard.slice(want.length).map(h => h.word).join(' '))}</div>`;
   }
-  spell.checked = true; bump('spell');
-  $('#spellResult').innerHTML = `<div class="verdict" style="color:${ok ? 'var(--ok)' : 'var(--bad)'}">${ok ? 'Correcto' : 'Revisa las marcas'}</div>${html}`;
+  if (!spell.scored) { spell.scored = true; bump('spell'); }
+  spell.checked = true;
+  $('#spellResult').innerHTML = `<div class="verdict" style="color:${ok ? 'var(--ok)' : 'var(--bad)'}">${ok ? 'Correcto' : 'Revisa las marcas'}</div>${html}${heardLine}
+    ${voice && !ok ? '<p class="muted small">Puedes tocar 🎙 otra vez para reintentar.</p>' : ''}`;
   $('#spellNext').textContent = 'Siguiente';
 }
-function newSpellAndPlay() { newSpell(); if (spell.mode !== 'nato') playSpell(false); }
+function newSpellAndPlay() { newSpell(); if (!showsTarget()) playSpell(false); }
+$$('#spellAnswer button').forEach(b => b.onclick = () => { S.spellAnswer = b.dataset.answer; persist(); newSpell(); });
 $('#spellCheck').onclick = checkSpell;
 $('#spellNext').onclick = newSpellAndPlay;
 $('#spellInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); checkSpell(); } });
-$('#spellMic').onclick = () => listen({ button: $('#spellMic'), onInterim: t => { $('#spellInput').value = t; }, onFinal: t => { $('#spellInput').value = t; checkSpell(); } });
+$('#spellMic').onclick = () => listen({ button: $('#spellMic'), onInterim: t => { $('#spellInput').value = t; }, onFinal: t => { $('#spellInput').value = t; spell.checked = false; checkSpell(); } });
 $$('#spellModes .chip').forEach(b => b.onclick = () => {
   $$('#spellModes .chip').forEach(x => x.classList.toggle('on', x === b));
   spell.mode = b.dataset.mode; newSpell();
@@ -632,25 +791,35 @@ $('#notesPractice').onclick = () => { show('dict'); loadDict('errores'); };
 
 /* ============ Ajustes ============ */
 function fillModels(list) {
-  const sel = $('#model'); const set = new Set(list); set.add(S.model);
-  sel.innerHTML = [...set].map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
-  sel.value = S.model;
+  const set = new Set(list); set.add(S.model); if (S.backupModel) set.add(S.backupModel);
+  const opts = [...set].map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  $('#model').innerHTML = opts; $('#model').value = S.model;
+  $('#backupModel').innerHTML = opts; $('#backupModel').value = S.backupModel;
 }
 function initSettings() {
   $('#apiKey').value = S.apiKey; $('#level').value = S.level; $('#goal').value = String(S.goal);
   $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
   $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
-  fillModels(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+  $('#pitch').value = S.pitch; $('#pitchVal').textContent = S.pitch;
+  fillModels(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
 }
 $('#apiKey').addEventListener('change', e => { S.apiKey = e.target.value.trim(); persist(); updateHome(); });
-$('#model').addEventListener('change', e => { S.model = e.target.value; persist(); });
+$('#model').addEventListener('change', e => { S.model = e.target.value; fallbackNotified = ''; persist(); });
+$('#backupModel').addEventListener('change', e => { S.backupModel = e.target.value; persist(); });
 $('#level').addEventListener('change', e => { S.level = e.target.value; persist(); });
 $('#goal').addEventListener('change', e => { S.goal = +e.target.value; persist(); updateHome(); });
 $('#autoSend').addEventListener('change', e => { S.autoSend = e.target.checked; persist(); });
 $('#autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; persist(); });
-$('#voice').addEventListener('change', e => { S.voice = e.target.value; persist(); });
+$$('.voice-sel').forEach(sel => sel.addEventListener('change', e => { S.voices[sel.dataset.role] = e.target.value; persist(); }));
+const TEST_LINES = {
+  lars: ["Hi, I'm Lars. Let's check the edger together.", 'lars'],
+  mike: ["Hey, I'm Mike. How's the trimmer running today?", 'mike'],
+  erik: ["Good morning, I'm Erik. Let's review the project schedule.", 'erik'],
+  narrator: ['The saw blades are ready. Please check the tension.', 'narrator']
+};
+$$('[data-test]').forEach(b => b.onclick = () => { const [line, role] = TEST_LINES[b.dataset.test]; speak(line, S.rate, role); });
+$('#pitch').addEventListener('input', e => { S.pitch = +e.target.value; $('#pitchVal').textContent = S.pitch; persist(); });
 $('#rate').addEventListener('input', e => { S.rate = +e.target.value; $('#rateVal').textContent = S.rate + 'x'; persist(); });
-$('#btnTestVoice').onclick = () => speak('Good morning! The saw blades are ready. Shall we start the line?');
 $('#btnModels').onclick = async () => {
   S.apiKey = $('#apiKey').value.trim(); persist();
   if (!S.apiKey) { toast('Pega tu clave primero.'); return; }
@@ -701,6 +870,7 @@ $('#btnReset').onclick = () => {
 
 /* ============ Inicio de la app ============ */
 initSettings();
+applyDictMode();
 updateHome();
 renderDictCats();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
