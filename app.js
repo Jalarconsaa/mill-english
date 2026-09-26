@@ -139,15 +139,20 @@ function loadVoices() {
 if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
 // role: 'mattias' | 'joel' | 'alvaro' | 'paul' | 'local' | 'narrator'
-function speak(text, rate = S.rate, role = 'narrator') {
+// avEl: avatar (o lista de avatares) que mueve la boca mientras suena la voz
+function stopTalking() { $$('.av.talking').forEach(el => el.classList.remove('talking')); }
+function speak(text, rate = S.rate, role = 'narrator', avEl = null, pitchOverride = null) {
   return new Promise(res => {
     if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return res(); }
-    speechSynthesis.cancel();
+    speechSynthesis.cancel(); stopTalking();
     const u = new SpeechSynthesisUtterance(text);
     const v = voiceFor(role);
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
-    u.rate = rate; u.pitch = role === 'narrator' ? 1 : S.pitch;
-    u.onend = res; u.onerror = res;
+    u.rate = rate; u.pitch = pitchOverride || (role === 'narrator' || role === 'local' ? 1 : S.pitch);
+    const els = avEl ? (avEl.length !== undefined ? Array.from(avEl) : [avEl]) : [];
+    u.onstart = () => els.forEach(el => el.classList.add('talking'));
+    const done = () => { els.forEach(el => el.classList.remove('talking')); res(); };
+    u.onend = done; u.onerror = done;
     speechSynthesis.speak(u);
   });
 }
@@ -342,10 +347,19 @@ const STRICTNESS = {
   SCENARIOS.filter(s => s.group === g).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; og.appendChild(o); });
   $('#scenario').appendChild(og);
 });
+function renderPersonaPick() {
+  const cur = $('#persona').value;
+  $('#personaPick').innerHTML = Object.entries(PERSONAS).map(([k, p]) => `<button data-p="${k}" class="${k === cur ? 'on' : ''}">
+    ${avatarHTML(k, p.name, 'lg')}<strong>${esc(p.name)}</strong><small>${esc(p.es.split(', ').slice(1).join(', '))}</small></button>`).join('');
+  $$('#personaPick button').forEach(b => b.onclick = () => {
+    $('#persona').value = b.dataset.p; renderPersonaPick();
+    const av = b.querySelector('.av'); const [line] = TEST_LINES[b.dataset.p]; speak(line, S.rate, b.dataset.p, av);
+  });
+}
 // Sugerir a Paul para temas de jefatura y proyectos
 $('#scenario').addEventListener('change', () => {
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
-  if ((sc.group === 'Supervisión y jefatura' || sc.id === 'upgrade' || sc.id === 'progress') ) $('#persona').value = 'paul';
+  if ((sc.group === 'Supervisión y jefatura' || sc.id === 'upgrade' || sc.id === 'progress') ) { $('#persona').value = 'paul'; renderPersonaPick(); }
 });
 
 function talkSystem() {
@@ -379,23 +393,35 @@ Respond ONLY with a JSON object, with exactly these keys:
 "reply_es":"Spanish translation of your reply"}`;
 }
 
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function scrollChatToEnd() {
+  const m = $('#main');
+  const go = () => m.scrollTo({ top: m.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' });
+  // Se repite para cubrir cambios de altura (traducciones, avatares, teclado del teléfono)
+  requestAnimationFrame(go); setTimeout(go, 150); setTimeout(go, 450);
+}
+// Al abrir el teclado en el teléfono la pantalla se achica: mantener visible el último mensaje
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
+  if (['talk', 'tutor'].includes(currentView) && ['talkInput', 'tutorInput'].includes(document.activeElement?.id)) scrollChatToEnd();
+});
+['talkInput', 'tutorInput'].forEach(id => document.getElementById(id).addEventListener('focus', () => setTimeout(scrollChatToEnd, 300)));
 function chatAdd(html, cls) {
   const div = document.createElement('div'); div.className = cls; div.innerHTML = html;
   $('#chat').appendChild(div);
-  requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+  scrollChatToEnd();
   return div;
 }
 function addAIMsg(reply, replyEs) {
-  const name = PERSONAS[$('#persona').value].name;
-  const div = chatAdd(`<div class="who">${esc(name)}</div><div>${esc(reply)}</div>
+  const role = $('#persona').value, name = PERSONAS[role].name;
+  const div = chatAdd(`<div class="who">${avatarHTML(role, name, 'md')}${esc(name)}</div><div>${esc(reply)}</div>
     <div class="es" hidden>${esc(replyEs)}</div>
     <div class="tools"><button data-a="speak">🔊 Escuchar</button><button data-a="slow">🐢 Lento</button><button data-a="es">Traducir</button></div>`, 'msg ai');
-  const role = $('#persona').value;
+  const av = div.querySelector('.av');
   if (S.level === 'A1') div.querySelector('.es').hidden = false;
-  div.querySelector('[data-a=speak]').onclick = () => speak(reply, S.rate, role);
-  div.querySelector('[data-a=slow]').onclick = () => speak(reply, 0.7, role);
-  div.querySelector('[data-a=es]').onclick = () => { const e = div.querySelector('.es'); e.hidden = !e.hidden; };
-  if (S.autoSpeak) speak(reply, S.rate, role);
+  div.querySelector('[data-a=speak]').onclick = () => speak(reply, S.rate, role, av);
+  div.querySelector('[data-a=slow]').onclick = () => speak(reply, 0.7, role, av);
+  div.querySelector('[data-a=es]').onclick = () => { const e = div.querySelector('.es'); e.hidden = !e.hidden; if (!e.hidden && div === $('#chat').lastElementChild) scrollChatToEnd(); };
+  if (S.autoSpeak) speak(reply, S.rate, role, av);
 }
 function addFeedback(r, said) {
   const cs = Array.isArray(r.corrections) ? r.corrections : [];
@@ -438,7 +464,8 @@ $('#btnStartTalk').addEventListener('click', async () => {
   talk.history = []; $('#chat').innerHTML = '';
   $('#talkSetup').hidden = true; $('#composer').hidden = false;
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
-  chatAdd(`<strong>${esc(sc.es)}</strong> con ${esc(PERSONAS[$('#persona').value].es)}. Responde hablando con el micrófono 🎙 o escribiendo.`, 'hints');
+  const pr = $('#persona').value;
+  chatAdd(`<div class="talk-hero">${avatarHTML(pr, PERSONAS[pr].name, 'lg')}<div><strong>${esc(sc.es)}</strong><br>con ${esc(PERSONAS[pr].es)}.<br><span class="muted small">Responde hablando con el micrófono 🎙 o escribiendo.</span></div></div>`, 'hints');
   const ok = await talkCall('[START]');
   if (!ok) { $('#talkSetup').hidden = false; $('#composer').hidden = true; }
 });
@@ -945,6 +972,8 @@ function openDialog(id) {
   lst.dlg = d; lst.answers = {}; lst.showText = false; lst.showEs = S.level === 'A1';
   $('#listenBrowse').hidden = true; $('#listenPlayer').hidden = false; $('#main').scrollTop = 0;
   $('#lpTitle').textContent = d.title; $('#lpContext').textContent = d.context || '';
+  $('#lpStage').innerHTML = Object.entries(d.speakers).map(([k, [nm, role]]) =>
+    `<div class="actor" data-sp="${k}">${avatarHTML(AVATARS[role] ? role : 'local', nm, 'lg')}<span class="nm" style="color:${speakerColor(d, k)}">${esc(nm)}</span></div>`).join('');
   $('#lpResult').innerHTML = '';
   renderTranscript(); renderQuestions();
 }
@@ -953,9 +982,11 @@ function renderTranscript() {
   const d = lst.dlg;
   $('#lpShowText').textContent = lst.showText ? 'Ocultar texto' : 'Mostrar texto';
   $('#lpShowEs').textContent = lst.showEs ? 'Ocultar traducción' : 'Mostrar traducción';
+  const avKey = sp => AVATARS[d.speakers[sp][1]] ? d.speakers[sp][1] : 'local';
   $('#lpLines').innerHTML = d.lines.map(([sp, en, es], i) => `<div class="tline" data-i="${i}" style="--sc:${speakerColor(d, sp)}">
+    ${avatarHTML(avKey(sp), d.speakers[sp][0], 'sm')}<div class="tl-body">
     <span class="sp">${esc(d.speakers[sp][0])}:</span> <span class="en ${lst.showText ? '' : 'hide'}">${esc(en)}</span>
-    ${lst.showEs ? `<div class="es">${esc(es)}</div>` : ''}</div>`).join('');
+    ${lst.showEs ? `<div class="es">${esc(es)}</div>` : ''}</div></div>`).join('');
   $$('#lpLines .tline').forEach(el => el.onclick = () => playLines(+el.dataset.i, +el.dataset.i, S.rate));
 }
 function renderQuestions() {
@@ -988,15 +1019,18 @@ async function playLines(from, to, rate) {
   const roles = Object.fromEntries(Object.entries(d.speakers).map(([k, v]) => [k, v[1]]));
   // Si los dos hablantes quedan con la misma voz, cambiamos el tono del segundo
   const sameVoice = voiceFor(roles.A)?.name === voiceFor(roles.B)?.name;
-  $('#lpPlay').textContent = '■ Detener';
+  $('#lpPlay').textContent = '■ Detener'; $('#lpStage').classList.add('playing');
   for (let i = from; i <= to; i++) {
     if (token !== playToken) return;
     $$('#lpLines .tline').forEach(el => el.classList.toggle('now', +el.dataset.i === i));
+    if (from !== to) $(`#lpLines .tline[data-i="${i}"]`)?.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
     const [sp, en] = d.lines[i];
-    await speakAs(en, rate, roles[sp], sameVoice && sp === 'B' ? 1.2 : null);
+    $$('#lpStage .actor').forEach(el => el.classList.toggle('now', el.dataset.sp === sp));
+    const avs = [$(`#lpStage .actor[data-sp="${sp}"] .av`), $(`#lpLines .tline[data-i="${i}"] .av`)].filter(Boolean);
+    await speak(en, rate, roles[sp], avs, sameVoice && sp === 'B' ? 1.2 : null);
     await wait(350);
   }
-  if (token === playToken) { $$('#lpLines .tline').forEach(el => el.classList.remove('now')); $('#lpPlay').textContent = '▶ Escuchar conversación'; }
+  if (token === playToken) { $$('#lpLines .tline').forEach(el => el.classList.remove('now')); $$('#lpStage .actor').forEach(el => el.classList.remove('now')); $('#lpStage').classList.remove('playing'); $('#lpPlay').textContent = '▶ Escuchar conversación'; }
 }
 function speakAs(text, rate, role, pitchOverride) {
   return new Promise(res => {
@@ -1008,7 +1042,7 @@ function speakAs(text, rate, role, pitchOverride) {
   });
 }
 $('#lpPlay').onclick = () => {
-  if ($('#lpPlay').textContent.startsWith('■')) { playToken++; speechSynthesis.cancel(); $('#lpPlay').textContent = '▶ Escuchar conversación'; $$('#lpLines .tline').forEach(el => el.classList.remove('now')); return; }
+  if ($('#lpPlay').textContent.startsWith('■')) { playToken++; speechSynthesis.cancel(); stopTalking(); $('#lpStage').classList.remove('playing'); $('#lpPlay').textContent = '▶ Escuchar conversación'; $$('#lpLines .tline').forEach(el => el.classList.remove('now')); return; }
   playLines(0, lst.dlg.lines.length - 1, S.rate);
 };
 $('#lpSlow').onclick = () => playLines(0, lst.dlg.lines.length - 1, 0.7);
@@ -1265,7 +1299,7 @@ Respond ONLY with JSON: {"answer_es":"...","examples":[{"en":"...","es":"..."}]}
 }
 function tutorAdd(html, cls) {
   const div = document.createElement('div'); div.className = cls; div.innerHTML = html;
-  $('#tutorChat').appendChild(div); requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+  $('#tutorChat').appendChild(div); scrollChatToEnd();
   return div;
 }
 async function tutorAsk(q) {
@@ -1279,10 +1313,11 @@ async function tutorAsk(q) {
   try {
     const r = await gemini(tutorSystem(), tutorHistory, 0.6);
     typing.remove();
-    const div = tutorAdd(`<div class="who">Tutor</div><div class="tutor-answer">${esc(r.answer_es || '')}</div>` +
+    const div = tutorAdd(`<div class="who">${avatarHTML('tutor', 'Tutor', 'md')}Tutor</div><div class="tutor-answer">${esc(r.answer_es || '')}</div>` +
       (r.examples || []).map((ex, i) => `<div class="tutor-ex"><div>${esc(ex.en)}</div><div class="es">${esc(ex.es)}</div>
         <button data-say="${i}">🔊 Escuchar</button> <button data-save="${i}">🃏 Guardar en tarjetas</button></div>`).join(''), 'msg ai');
-    div.querySelectorAll('[data-say]').forEach(b => b.onclick = () => speak(r.examples[+b.dataset.say].en, S.rate, 'narrator'));
+    const tav = div.querySelector('.av');
+    div.querySelectorAll('[data-say]').forEach(b => b.onclick = () => speak(r.examples[+b.dataset.say].en, S.rate, 'narrator', tav));
     div.querySelectorAll('[data-save]').forEach(b => b.onclick = () => {
       const ex = r.examples[+b.dataset.save], st = srs();
       if (!st.custom.some(c => c.en === ex.en)) { st.custom.push({ en: ex.en, es: ex.es }); persist(); }
@@ -1357,6 +1392,7 @@ document.addEventListener('click', e => {
 /* ============ Inicio de la app ============ */
 initSettings();
 applyDictMode();
+renderPersonaPick();
 updateHome();
 // Invitación de equipo (?equipo=...) y regreso tras cambiar de usuario (?v=users)
 (() => {

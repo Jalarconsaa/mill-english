@@ -63,7 +63,9 @@
       <label>Escenario
         <select id="scenario"></select>
       </label>
-      <label>Técnico
+      <label>Técnico</label>
+      <div class="persona-pick" id="personaPick"></div>
+      <label hidden>Técnico
         <select id="persona">
           <option value="mattias">Mattias · técnico sueco</option>
           <option value="joel">Joel · técnico sueco</option>
@@ -112,6 +114,7 @@
     <div id="listenPlayer" hidden>
       <button class="btn ghost small" id="listenBack">← Volver</button>
       <h2 class="player-title" id="lpTitle"></h2>
+      <div class="stage" id="lpStage"></div>
       <p class="muted" id="lpContext"></p>
       <div class="play-row">
         <button class="play" id="lpPlay">▶ Escuchar conversación</button>
@@ -401,6 +404,7 @@
 
 <script src="data.js"></script>
 <script src="listening.js"></script>
+<script src="avatars.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

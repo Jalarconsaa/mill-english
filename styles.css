@@ -374,3 +374,34 @@ body[data-view="tutor"] .tutor-btn { background: var(--c-tutor); border-radius: 
   .today-chip { font-size: 12px; padding: 3px 8px; }
   .icon-btn { width: 38px; }
 }
+
+/* Avatares */
+.av { display: inline-block; border-radius: 50%; flex: none; vertical-align: middle; transition: box-shadow .2s, transform .2s; }
+.av svg { width: 100%; height: 100%; display: block; }
+.av-sm { width: 30px; height: 30px; }
+.av-md { width: 44px; height: 44px; }
+.av-lg { width: 88px; height: 88px; }
+.av .mouth-open { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.av.talking { box-shadow: 0 0 0 3px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent); transform: scale(1.05); }
+.av.talking .mouth-closed { opacity: 0; }
+.av.talking .mouth-open { animation: av-talk .17s infinite alternate ease-in-out; }
+@keyframes av-talk { from { opacity: 1; transform: scaleY(.3); } to { opacity: 1; transform: scaleY(1.1); } }
+@media (prefers-reduced-motion: reduce) { .av.talking .mouth-open { animation: none; opacity: 1; } .av.talking { transform: none; } }
+.msg.ai .who { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.persona-pick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0 14px; }
+.persona-pick button {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 8px; cursor: pointer;
+  background: var(--spruce); border: 2px solid var(--spruce-3); border-radius: var(--radius-m); color: var(--sawdust);
+}
+.persona-pick button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--spruce)); }
+.persona-pick strong { font-size: 16px; }
+.persona-pick small { color: var(--muted); font-size: 12.5px; text-align: center; line-height: 1.3; }
+.stage { display: flex; justify-content: center; gap: 28px; margin: 14px 0 6px; }
+.stage .actor { display: flex; flex-direction: column; align-items: center; gap: 4px; transition: opacity .2s; }
+.stage.playing .actor { opacity: .5; }
+.stage.playing .actor.now { opacity: 1; }
+.stage .actor span.nm { font-family: var(--display); font-weight: 700; font-size: 18px; }
+.tline { display: flex; gap: 10px; align-items: flex-start; }
+.tline .tl-body { flex: 1; }
+.talk-hero { display: flex; gap: 12px; align-items: center; }
+[hidden] { display: none !important; }
