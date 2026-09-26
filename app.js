@@ -12,7 +12,7 @@ function load(key, def) {
 }
 const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
   autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.5-flash-lite',
-  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '' });
+  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5 });
 if (!S.voices) S.voices = {};
 // Migrar voces elegidas con los nombres antiguos
 [['lars', 'mattias'], ['mike', 'alvaro'], ['erik', 'paul']].forEach(([o, n]) => { if (S.voices[o] && !S.voices[n]) S.voices[n] = S.voices[o]; delete S.voices[o]; });
@@ -169,33 +169,78 @@ async function speakSequence(parts, rate, gap = 250) {
 
 /* ============ Voz: escuchar (reconocimiento) ============ */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let activeRec = null;
-function listen({ onInterim, onFinal, button }) {
+// Micrófono: sigue escuchando hasta que tocas 🎙 de nuevo o hasta un silencio largo (configurable en Ajustes).
+// Chrome en Android corta la escucha sola tras pausas cortas: aquí se reinicia automáticamente sin perder lo dicho.
+let recSession = null;
+function listen({ onInterim, onFinal, button, lang = 'en-US' }) {
   if (!SR) { toast('Tu navegador no reconoce voz. Usa Chrome en Android.'); return; }
-  if (activeRec) { activeRec.stop(); return; }
-  speechSynthesis.cancel();
-  const rec = new SR();
-  rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 1; rec.continuous = false;
-  let finalText = '';
-  rec.onresult = e => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
-      else interim += e.results[i][0].transcript;
-    }
-    onInterim && onInterim((finalText + interim).trim());
-  };
-  rec.onerror = e => {
-    if (e.error === 'not-allowed') toast('Permite el uso del micrófono en los ajustes del navegador.');
-    else if (e.error === 'no-speech') toast('No te escuché. Intenta de nuevo, más cerca del teléfono.');
-    else if (e.error === 'network') toast('El reconocimiento de voz necesita internet.');
-  };
-  rec.onend = () => {
-    activeRec = null; button && button.classList.remove('listening');
-    if (finalText.trim()) onFinal && onFinal(finalText.trim());
-  };
-  activeRec = rec; button && button.classList.add('listening');
-  rec.start();
+  if (recSession) { recSession.finish(); return; }
+  speechSynthesis.cancel(); stopTalking();
+  const ses = { finals: [], interim: '', stopped: false, done: false, rec: null, started: Date.now(), lastHeard: Date.now(), fatal: false };
+  const text = () => [...ses.finals, ses.interim].join(' ').replace(/\s+/g, ' ').trim();
+  const low = t => t.toLowerCase();
+  function startRec() {
+    const rec = new SR(); ses.rec = rec;
+    rec.lang = lang; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+    const base = ses.finals.length;           // lo dicho en tramos anteriores se conserva
+    rec.onresult = e => {
+      if (ses.done) return;
+      const local = []; let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = (e.results[i][0]?.transcript || '').trim(); if (!t) continue;
+        if (e.results[i].isFinal) {
+          const last = local[local.length - 1];
+          // Algunos Android repiten el texto anterior dentro del nuevo resultado: se evita duplicar
+          if (last && low(t).startsWith(low(last))) local[local.length - 1] = t;
+          else if (!(last && low(last).startsWith(low(t)))) local.push(t);
+        } else interim = t;
+      }
+      const lastF = local[local.length - 1];
+      if (lastF && low(interim).startsWith(low(lastF))) interim = interim.slice(lastF.length).trim();
+      ses.finals = ses.finals.slice(0, base).concat(local);
+      ses.interim = interim; ses.lastHeard = Date.now();
+      onInterim && onInterim(text());
+    };
+    rec.onerror = e => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Permite el uso del micrófono en los ajustes del navegador.'); ses.fatal = true; ses.stopped = true; }
+      else if (e.error === 'network') { toast('El reconocimiento de voz necesita internet.'); ses.fatal = true; ses.stopped = true; }
+      else if (e.error === 'audio-capture') { toast('No se encontró micrófono. Revisa el audífono o el permiso.'); ses.fatal = true; ses.stopped = true; }
+      // 'no-speech' y 'aborted' no cortan la sesión: se vuelve a escuchar
+    };
+    rec.onend = () => {
+      if (!ses.stopped) { setTimeout(() => { if (!ses.stopped) { try { startRec(); } catch { finalize(); } } else finalize(); }, 120); }
+      else finalize();
+    };
+    try { rec.start(); } catch { finalize(); }
+  }
+  function finish() {
+    if (ses.stopped && !ses.rec) return finalize();
+    ses.stopped = true;
+    if (ses.interim) { ses.finals.push(ses.interim); ses.interim = ''; }
+    try { ses.rec.stop(); } catch { finalize(); }
+    setTimeout(finalize, 1500);             // por si el navegador no avisa el término
+  }
+  function finalize() {
+    if (ses.done) return; ses.done = true;
+    clearInterval(ses.timer); recSession = null;
+    if (button) { button.classList.remove('listening'); button.removeAttribute('data-secs'); }
+    const t = text();
+    if (t) onFinal && onFinal(t);
+    else if (!ses.fatal) toast('No te escuché. Toca 🎙 y habla más cerca del teléfono.');
+  }
+  ses.finish = finish;
+  // Corte automático por silencio (o solo manual)
+  ses.timer = setInterval(() => {
+    const now = Date.now(), said = !!text();
+    if (button) button.setAttribute('data-secs', Math.floor((now - ses.started) / 1000));
+    if (S.silence > 0 && said && now - ses.lastHeard > S.silence * 1000) finish();
+    else if (!said && now - ses.started > 15000) finish();
+    else if (now - ses.started > 120000) finish();   // máximo 2 minutos
+  }, 250);
+  recSession = ses;
+  if (button) button.classList.add('listening');
+  toast(S.silence > 0 ? `🎙 Escuchando… Toca 🎙 otra vez cuando termines (o espera ${S.silence} s en silencio).` : '🎙 Escuchando… Toca 🎙 otra vez cuando termines.', 3500);
+  startRec();
 }
 
 /* ============ IA (Google Gemini, plan gratuito) ============ */
@@ -870,6 +915,7 @@ function fillModels(list) {
 function initSettings() {
   $('#apiKey').value = S.apiKey; $('#level').value = S.level; $('#goal').value = String(S.goal);
   $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
+  $('#silence').value = String(S.silence ?? 5);
   $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
   $('#pitch').value = S.pitch; $('#pitchVal').textContent = S.pitch;
   fillModels(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
@@ -880,6 +926,7 @@ $('#backupModel').addEventListener('change', e => { S.backupModel = e.target.val
 $('#level').addEventListener('change', e => { S.level = e.target.value; persist(); });
 $('#goal').addEventListener('change', e => { S.goal = +e.target.value; persist(); updateHome(); });
 $('#autoSend').addEventListener('change', e => { S.autoSend = e.target.checked; persist(); });
+$('#silence').addEventListener('change', e => { S.silence = +e.target.value; persist(); });
 $('#autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; persist(); });
 $$('.voice-sel').forEach(sel => sel.addEventListener('change', e => { S.voices[sel.dataset.role] = e.target.value; persist(); }));
 const TEST_LINES = {
@@ -1330,15 +1377,9 @@ async function tutorAsk(q) {
 $('#tutorSend').onclick = () => tutorAsk($('#tutorInput').value);
 $('#tutorInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tutorAsk($('#tutorInput').value); } });
 $$('#tutorChips .chip').forEach(b => b.onclick = () => tutorAsk(b.dataset.q));
-$('#tutorMic').onclick = () => {
-  if (!SR) { toast('Tu navegador no reconoce voz.'); return; }
-  // La pregunta al tutor se dicta en español
-  const rec = new SR(); rec.lang = 'es-CL'; rec.interimResults = true;
-  $('#tutorMic').classList.add('listening');
-  rec.onresult = e => { $('#tutorInput').value = Array.from(e.results).map(r => r[0].transcript).join(' '); };
-  rec.onend = () => $('#tutorMic').classList.remove('listening');
-  rec.start();
-};
+$('#tutorMic').onclick = () => listen({ button: $('#tutorMic'), lang: 'es-CL',
+  onInterim: t => { $('#tutorInput').value = t; },
+  onFinal: t => { $('#tutorInput').value = t; } });
 $('#btnTutor').onclick = () => show(currentView === 'tutor' ? 'home' : 'tutor');
 
 /* ============ Test de nivel ============ */

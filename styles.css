@@ -405,3 +405,11 @@ body[data-view="tutor"] .tutor-btn { background: var(--c-tutor); border-radius: 
 .tline .tl-body { flex: 1; }
 .talk-hero { display: flex; gap: 12px; align-items: center; }
 [hidden] { display: none !important; }
+
+/* Micrófono escuchando: contador de segundos */
+.mic { position: relative; }
+.mic.listening::after {
+  content: attr(data-secs) "s"; position: absolute; top: -8px; right: -6px; background: var(--sawdust); color: var(--spruce);
+  font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 5px; min-width: 22px;
+}
+.mic.listening:not([data-secs])::after { content: none; }

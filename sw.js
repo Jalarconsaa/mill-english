@@ -1,4 +1,4 @@
-const CACHE = 'mill-english-v7';
+const CACHE = 'mill-english-v8';
 const SHELL = ['./', './index.html', './styles.css', './data.js', './app.js', './listening.js', './avatars.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
