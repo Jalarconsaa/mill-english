@@ -3,7 +3,7 @@
 La app necesita estar publicada en internet con HTTPS para que funcionen el micrófono y la instalación. Lo haremos gratis con GitHub Pages, todo desde el celular.
 
 ## 1. Descomprimir
-Abre el archivo `mill-english.zip` con la app "Files" (Archivos) de Google y toca "Extraer". Quedará una carpeta con 10 archivos.
+Abre el archivo zip con la app "Files" (Archivos) de Google y toca "Extraer". Quedará una carpeta con todos los archivos de la app.
 
 ## 2. Publicar en GitHub Pages
 1. Entra a https://github.com en Chrome y crea una cuenta gratis.
@@ -30,3 +30,6 @@ El dictado y el deletreo funcionan sin clave y sin internet (el reconocimiento d
 - Si te sale "límite gratuito", espera un minuto: el plan gratis tiene límites por minuto y por día.
 - En el plan gratuito, Google puede usar las conversaciones para mejorar sus productos: no escribas información confidencial de la empresa.
 - Exporta un respaldo de tu progreso de vez en cuando (Ajustes → Exportar respaldo).
+
+## Usuarios y seguimiento del equipo
+Toca el círculo con tus iniciales (arriba) para ponerle tu nombre a tu usuario, crear usuarios para compañeros o cambiar de usuario. Para ver el avance de todo el equipo desde sus propios teléfonos, sigue las instrucciones del archivo EQUIPO.md.

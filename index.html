@@ -17,6 +17,7 @@
 <header class="topbar">
   <div class="brand"><span class="stamp">Mill English</span></div>
   <div class="today-chip" id="todayChip">0 / 20 min</div>
+  <button class="avatar" id="btnUser" aria-label="Usuarios">?</button>
   <button class="icon-btn" id="btnSettings" aria-label="Ajustes">⚙︎</button>
 </header>
 
@@ -36,6 +37,7 @@
     <ol class="routine">
       <li data-go="dict" id="r-dict"><span class="tick"></span><div><strong>Dictado</strong><span>5–10 min · escucha y escribe frases del trabajo</span></div></li>
       <li data-go="spell" id="r-spell"><span class="tick"></span><div><strong>Deletreo</strong><span>3–5 min · palabras, códigos y alfabeto fonético</span></div></li>
+      <li data-go="listen" id="r-listen"><span class="tick"></span><div><strong>Listening</strong><span>5 min · escucha una conversación y responde</span></div></li>
       <li data-go="talk" id="r-talk"><span class="tick"></span><div><strong>Conversación</strong><span>5–15 min · habla con un técnico virtual</span></div></li>
       <li data-go="notes" id="r-notes"><span class="tick"></span><div><strong>Repaso de errores</strong><span>2 min · lo que más te cuesta</span></div></li>
     </ol>
@@ -57,9 +59,10 @@
       </label>
       <label>Técnico
         <select id="persona">
-          <option value="lars">Lars · sueco</option>
-          <option value="mike">Mike · canadiense</option>
-          <option value="erik">Erik · jefe de proyecto sueco</option>
+          <option value="mattias">Mattias · técnico sueco</option>
+          <option value="joel">Joel · técnico sueco</option>
+          <option value="alvaro">Álvaro · técnico de Canadá (habla español)</option>
+          <option value="paul">Paul · jefe de proyecto sueco</option>
         </select>
       </label>
       <button class="btn primary wide" id="btnStartTalk">Empezar conversación</button>
@@ -76,6 +79,81 @@
         <button class="send" id="btnSend" aria-label="Enviar">➤</button>
       </div>
     </div>
+  </section>
+
+  <!-- LISTENING -->
+  <section class="view" id="view-listen">
+    <div id="listenBrowse">
+      <div class="chips" id="listenTopics"></div>
+      <div id="listenList"></div>
+      <div class="card-plain ai-box">
+        <strong>Crear conversación nueva con IA</strong>
+        <label>Tema
+          <select id="listenAITopic">
+            <option value="the new USNR edger with the BioLuma scanner">Canteadora nueva y scanner BioLuma</option>
+            <option value="the sawmill upgrade: removing the return line, double infeed, two primary machines, two chipper canters">Upgrade del aserradero</option>
+            <option value="increasing production from 28,000 to 45,000 cubic meters, bottlenecks and planning">Aumento de producción a 45.000 m³</option>
+            <option value="troubleshooting a machine breakdown with a USNR technician">Falla de una máquina</option>
+            <option value="safety during installation and maintenance">Seguridad</option>
+            <option value="log yard, debarker, trimmer, sorter bins, stacker, strapping, anti-sapstain dip and end painting">Equipos de la planta</option>
+            <option value="a supervisors and managers meeting with the machinery supplier">Supervisión y jefatura</option>
+            <option value="casual conversation with visiting technicians">Conversación casual</option>
+          </select>
+        </label>
+        <button class="btn primary wide" id="listenAI">Generar conversación</button>
+      </div>
+    </div>
+    <div id="listenPlayer" hidden>
+      <button class="btn ghost small" id="listenBack">← Volver</button>
+      <h2 class="player-title" id="lpTitle"></h2>
+      <p class="muted" id="lpContext"></p>
+      <div class="play-row">
+        <button class="play" id="lpPlay">▶ Escuchar conversación</button>
+        <button class="btn ghost" id="lpSlow">🐢 Lento</button>
+      </div>
+      <div class="row-btns">
+        <button class="btn ghost small" id="lpShowText">Mostrar texto</button>
+        <button class="btn ghost small" id="lpShowEs">Mostrar traducción</button>
+      </div>
+      <div class="transcript" id="lpLines"></div>
+      <h2 class="section-title">Preguntas</h2>
+      <div id="lpQuestions"></div>
+      <div class="result" id="lpResult"></div>
+    </div>
+  </section>
+
+  <!-- USUARIOS -->
+  <section class="view" id="view-users">
+    <h2 class="section-title">Usuarios en este teléfono</h2>
+    <div id="userList"></div>
+    <button class="btn primary wide" id="btnAddUser">+ Crear usuario</button>
+    <div class="card-plain" id="userForm" hidden>
+      <strong id="uFormTitle">Nuevo usuario</strong>
+      <label>Nombre <input id="uName" type="text" maxlength="40" placeholder="Ej: Pedro Soto"></label>
+      <label>Cargo o área <input id="uRole" type="text" maxlength="50" placeholder="Ej: Operador canteadora"></label>
+      <label>Nivel de inglés <select id="uLevel"></select></label>
+      <label>Color</label>
+      <div class="color-pick" id="uColors"></div>
+      <div class="row-btns">
+        <button class="btn primary" id="uSave">Guardar</button>
+        <button class="btn ghost" id="uCancel">Cancelar</button>
+      </div>
+    </div>
+
+    <h2 class="section-title">Seguimiento del equipo</h2>
+    <div class="card-plain">
+      <p class="muted">Conecta una planilla gratuita de Google Sheets para ver el avance de todos tus compañeros, cada uno desde su propio teléfono. Las instrucciones están en el archivo EQUIPO.</p>
+      <label>Enlace de la planilla del equipo
+        <input id="teamUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+      </label>
+      <div class="row-btns">
+        <button class="btn" id="btnSyncNow">Sincronizar ahora</button>
+        <button class="btn ghost" id="btnInvite">Invitar compañero</button>
+      </div>
+      <p class="muted small" id="syncStatus"></p>
+    </div>
+    <button class="btn wide" id="btnTeamPanel">Ver panel del equipo</button>
+    <div id="teamPanel"></div>
   </section>
 
   <!-- DICTADO -->
@@ -196,14 +274,20 @@
     <h2 class="section-title">Voces</h2>
     <div class="card-plain">
       <p class="muted small">Elige una voz para cada técnico y pruébala con ▶. Las voces marcadas con ♂ parecen masculinas.</p>
-      <label>Lars (técnico sueco)
-        <div class="composer-row"><select class="voice-sel" data-role="lars"></select><button class="btn ghost small" data-test="lars">▶</button></div>
+      <label>Mattias (técnico sueco)
+        <div class="composer-row"><select class="voice-sel" data-role="mattias"></select><button class="btn ghost small" data-test="mattias">▶</button></div>
       </label>
-      <label>Mike (técnico canadiense)
-        <div class="composer-row"><select class="voice-sel" data-role="mike"></select><button class="btn ghost small" data-test="mike">▶</button></div>
+      <label>Joel (técnico sueco)
+        <div class="composer-row"><select class="voice-sel" data-role="joel"></select><button class="btn ghost small" data-test="joel">▶</button></div>
       </label>
-      <label>Erik (jefe de proyecto)
-        <div class="composer-row"><select class="voice-sel" data-role="erik"></select><button class="btn ghost small" data-test="erik">▶</button></div>
+      <label>Álvaro (técnico de Canadá)
+        <div class="composer-row"><select class="voice-sel" data-role="alvaro"></select><button class="btn ghost small" data-test="alvaro">▶</button></div>
+      </label>
+      <label>Paul (jefe de proyecto sueco)
+        <div class="composer-row"><select class="voice-sel" data-role="paul"></select><button class="btn ghost small" data-test="paul">▶</button></div>
+      </label>
+      <label>Compañeros chilenos (en el listening)
+        <div class="composer-row"><select class="voice-sel" data-role="local"></select><button class="btn ghost small" data-test="local">▶</button></div>
       </label>
       <label>Dictado y deletreo
         <div class="composer-row"><select class="voice-sel" data-role="narrator"></select><button class="btn ghost small" data-test="narrator">▶</button></div>
@@ -243,6 +327,7 @@
 <nav class="tabbar" id="tabbar">
   <button data-view="home" class="on"><span>⌂</span>Hoy</button>
   <button data-view="talk"><span>🗣</span>Hablar</button>
+  <button data-view="listen"><span>👂</span>Listening</button>
   <button data-view="dict"><span>🎧</span>Dictado</button>
   <button data-view="spell"><span>🔤</span>Deletreo</button>
   <button data-view="notes"><span>📒</span>Errores</button>
@@ -251,6 +336,7 @@
 <div class="toast" id="toast" role="status"></div>
 
 <script src="data.js"></script>
+<script src="listening.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

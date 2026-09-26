@@ -183,8 +183,41 @@ WORDS.push(
   ["budget","presupuesto"],["uptime","disponibilidad"],["incident","incidente"],["supervisor","supervisor"],["deadline","plazo"]
 );
 
+
+Object.assign(PHRASES, {
+  canteadora: [
+    ["The new edger has a BioLuma scanner for grade scanning.", "La canteadora nueva tiene un escáner BioLuma para escanear el grado."],
+    ["The scanner measures every board in three dimensions.", "El escáner mide cada tabla en tres dimensiones."],
+    ["The optimizer decides the best width for each board.", "El optimizador decide el mejor ancho para cada tabla."],
+    ["Please clean the sensor windows at the start of every shift.", "Por favor limpia las ventanas de los sensores al inicio de cada turno."],
+    ["We need to check the calibration once a week.", "Tenemos que revisar la calibración una vez a la semana."],
+    ["The boards are not straight when they enter the edger.", "Las tablas no entran derechas a la canteadora."],
+    ["The customer wants less wane on the export boards.", "El cliente quiere menos arista faltante en las tablas de exportación."],
+    ["Can you connect remotely and check the optimizer?", "¿Puedes conectarte remotamente y revisar el optimizador?"]
+  ],
+  proyecto: [
+    ["We want to increase production from 28,000 to 45,000 cubic meters.", "Queremos aumentar la producción de 28.000 a 45.000 metros cúbicos."],
+    ["The return line will be removed in the upgrade.", "La línea de retorno se eliminará en el upgrade."],
+    ["There will be a double log infeed and two primary machines.", "Habrá una doble entrada de rollizos y dos máquinas principales."],
+    ["The chipper canters turn the slabs into chips.", "Los chipper canter convierten los lampazos en astillas."],
+    ["The installation will be done in three phases.", "La instalación se hará en tres etapas."],
+    ["The bottleneck will move to the trimmer.", "El cuello de botella se moverá al trimmer."],
+    ["We need more drying capacity for the new volume.", "Necesitamos más capacidad de secado para el nuevo volumen."],
+    ["What is the timeline for the engineering phase?", "¿Cuál es el cronograma de la etapa de ingeniería?"]
+  ]
+});
+Object.assign(CATEGORY_NAMES, { canteadora: "Canteadora USNR", proyecto: "Upgrade del aserradero" });
+WORDS.push(["calibration","calibración"],["wane","arista faltante"],["grade","grado"],["infeed","entrada"],["outfeed","salida"],
+  ["positioner","posicionador"],["commissioning","puesta en marcha"],["bottleneck","cuello de botella"],["layout","distribución"],
+  ["canter","canteador perfilador"],["chips","astillas"],["slab","lampazo"],["capacity","capacidad"],["timeline","cronograma"],
+  ["warranty","garantía"],["contractor","contratista"],["permit","permiso"],["throughput","producción por hora"]);
+
 // Escenarios de conversación (group = grupo en el menú)
 const SCENARIOS = [
+  { group:"Proyectos USNR", id:"edger-startup", es:"Puesta en marcha canteadora nueva", en:"The new USNR edger with the BioLuma scanner is starting up this week. Talk with the learner about first problems, board positioning, alarms, operator training and what to check every shift." },
+  { group:"Proyectos USNR", id:"bioluma", es:"Scanner BioLuma y optimizador", en:"Explain and discuss the BioLuma scanner and the optimizer with the learner: laser profiles, color vision, defects, wane and grade rules, calibration, cleaning the sensors, remote support." },
+  { group:"Proyectos USNR", id:"upgrade", es:"Upgrade del aserradero (2 años)", en:"Discuss the sawmill upgrade planned in about two years: removing the return line, double log infeed, two primary breakdown machines, two chipper canters, going from 28,000 to 45,000 cubic meters. Ask the learner about current problems, bottlenecks and expectations." },
+  { group:"Proyectos USNR", id:"progress", es:"Reunión de avance del proyecto", en:"Weekly progress meeting of the upgrade project: schedule, delays, engineering drawings, foundations, electrical work, contractors, safety, open issues and next steps." },
   { group:"Situaciones", id:"arrival", es:"Recibir al técnico", en:"You just arrived at the sawmill in Chile. The learner is meeting you at the gate to welcome you and take you to the office." },
   { group:"Situaciones", id:"breakdown", es:"Explicar una falla", en:"A machine on the production line (the learner decides which one) has a problem. You ask detailed questions to understand the failure: when it started, symptoms, error codes, noises." },
   { group:"Situaciones", id:"instructions", es:"Recibir instrucciones", en:"You are explaining a maintenance procedure step by step (for example changing saw blades or adjusting a sensor). Check that the learner understands and make them confirm or ask questions." },
@@ -212,7 +245,8 @@ const SCENARIOS = [
 ];
 
 const PERSONAS = {
-  lars: { name:"Lars", es:"Lars, técnico sueco", en:"Lars, a friendly Swedish service technician (a man) from a sawmill machinery company. You speak clear international English (it is your second language), sometimes a little direct." },
-  mike: { name:"Mike", es:"Mike, técnico canadiense", en:"Mike, a relaxed Canadian service technician (a man) from British Columbia. You speak natural North American English, with casual everyday expressions." },
-  erik: { name:"Erik", es:"Erik, jefe de proyecto sueco", en:"Erik, a Swedish project manager (a man) from the machinery supplier. Professional, organized, focused on results, deadlines and costs. Clear international English." }
+  mattias: { name:"Mattias", es:"Mattias, técnico sueco", en:"Mattias, a friendly Swedish service technician (a man) from USNR, the sawmill machinery supplier. You speak clear international English (it is your second language), calm and precise, sometimes a little direct." },
+  joel: { name:"Joel", es:"Joel, técnico sueco", en:"Joel, a young and energetic Swedish service technician (a man) from USNR, specialist in scanners and optimization software. You speak fluent international English with a Swedish touch, practical and friendly." },
+  alvaro: { name:"Álvaro", es:"Álvaro, técnico de Canadá (también habla español)", en:"Álvaro, a Canadian service technician (a man) from USNR in British Columbia. You speak natural North American English and you also speak Spanish (your parents are Latin American). You always speak English, but if the learner is clearly lost or writes in Spanish, you may add ONE short clarification in Spanish in parentheses, then continue in English." },
+  paul: { name:"Paul", es:"Paul, jefe de proyecto sueco", en:"Paul, a Swedish project manager (a man) from USNR. Professional, organized, focused on results, schedule, safety and costs. Clear international English." }
 };

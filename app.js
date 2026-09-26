@@ -10,22 +10,55 @@ function load(key, def) {
   try { const v = localStorage.getItem(key); return v ? Object.assign(structuredClone(def), JSON.parse(v)) : structuredClone(def); }
   catch { return structuredClone(def); }
 }
-function persist() {
-  try { localStorage.setItem('me_settings', JSON.stringify(S)); localStorage.setItem('me_data', JSON.stringify(D)); }
-  catch (e) { console.warn('No se pudo guardar', e); }
-}
 const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
   autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.5-flash-lite',
-  voices: { lars: '', mike: '', erik: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type' });
-if (!S.voices) S.voices = { lars: '', mike: '', erik: '', narrator: '' };
-const D = load('me_data', { stats: {}, notes: [] });
+  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '' });
+if (!S.voices) S.voices = {};
+// Migrar voces elegidas con los nombres antiguos
+[['lars', 'mattias'], ['mike', 'alvaro'], ['erik', 'paul']].forEach(([o, n]) => { if (S.voices[o] && !S.voices[n]) S.voices[n] = S.voices[o]; delete S.voices[o]; });
+delete S.voices.jake;
+['mattias', 'joel', 'alvaro', 'paul', 'local', 'narrator'].forEach(r => { if (S.voices[r] === undefined) S.voices[r] = ''; });
+
+/* ---- Usuarios (perfiles) en este teléfono ---- */
+const USER_COLORS = ['#F2B705', '#4DA3FF', '#B084F5', '#3DD68C', '#FF8A3D', '#FF6B8B', '#2EC4B6', '#E8E1D0'];
+const newId = () => 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+let P = null;
+try { P = JSON.parse(localStorage.getItem('me_profiles') || 'null'); } catch { P = null; }
+if (!P || !P.list || !P.list.length) {
+  // Primera vez con usuarios: el progreso anterior pasa al usuario "Yo"
+  const id = newId();
+  P = { current: id, list: [{ id, name: 'Yo', role: '', color: 0, level: S.level, goal: S.goal, created: Date.now() }] };
+  try {
+    const old = localStorage.getItem('me_data');
+    if (old) localStorage.setItem('me_data_' + id, old);
+    localStorage.setItem('me_profiles', JSON.stringify(P));
+  } catch {}
+}
+if (!P.list.some(u => u.id === P.current)) P.current = P.list[0].id;
+const me = () => P.list.find(u => u.id === P.current);
+S.level = me().level || S.level; S.goal = me().goal || S.goal;
+const D = load('me_data_' + P.current, { stats: {}, notes: [], listened: {} });
+if (!D.listened) D.listened = {};
+
+function persist() {
+  try {
+    const u = me(); u.level = S.level; u.goal = S.goal;
+    localStorage.setItem('me_settings', JSON.stringify(S));
+    localStorage.setItem('me_data_' + P.current, JSON.stringify(D));
+    localStorage.setItem('me_profiles', JSON.stringify(P));
+  } catch (e) { console.warn('No se pudo guardar', e); }
+  scheduleSync();
+}
+function dataOf(id) { try { return JSON.parse(localStorage.getItem('me_data_' + id) || '{}'); } catch { return {}; } }
+const initials = n => (n || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
 function dayKey(d = new Date()) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 function todayStats() {
   const k = dayKey();
-  if (!D.stats[k]) D.stats[k] = { secs: 0, dict: 0, spell: 0, talk: 0, notes: 0 };
+  if (!D.stats[k]) D.stats[k] = { secs: 0, dict: 0, spell: 0, talk: 0, notes: 0, listen: 0 };
+  if (D.stats[k].listen === undefined) D.stats[k].listen = 0;
   return D.stats[k];
 }
 function bump(field) { todayStats()[field]++; persist(); updateHome(); }
@@ -53,6 +86,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) lastA
 function show(view) {
   activity();
   currentView = view;
+  document.body.dataset.view = view;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
   $$('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   $('#main').scrollTop = 0;
@@ -60,8 +94,11 @@ function show(view) {
   if (view === 'notes') { renderNotes(); if (D.notes.length && !todayStats().notes) bump('notes'); }
   if (view === 'dict' && !dict.items.length) loadDict(dict.cat);
   if (view === 'spell' && !spell.target) newSpell();
+  if (view === 'listen') renderListenList();
+  if (view === 'users') renderUsers();
 }
 $$('.tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+$('#btnUser').addEventListener('click', () => show(currentView === 'users' ? 'home' : 'users'));
 $('#btnSettings').addEventListener('click', () => show(currentView === 'settings' ? 'home' : 'settings'));
 $('#btnCloseSettings').addEventListener('click', () => show('home'));
 document.addEventListener('click', e => { if (e.target.closest('[data-open-settings]')) show('settings'); });
@@ -73,7 +110,7 @@ let voices = [];
 const MALE_RX = /(^|[^a-z])(male|man|guy)([^a-z]|$)|daniel|david|mark|george|james|fred|alex|thomas|oliver|arthur|aaron|ryan|guy|iol|iom|tpd|rjs|gbd|gbg|gbc|male-/i;
 const FEMALE_RX = /female|woman|girl|samantha|karen|victoria|susan|zira|hazel|kate|serena|moira|tessa|fiona|libby|sonia|jenny|aria|iob|iog|sfg|tpf|tpc|gba|gbb|fis/i;
 const isMale = v => MALE_RX.test(v.name) && !FEMALE_RX.test(v.name);
-const ROLE_LANGS = { lars: ['en-GB', 'en-US'], mike: ['en-CA', 'en-US'], erik: ['en-GB', 'en-US'], narrator: ['en-US', 'en-GB'] };
+const ROLE_LANGS = { mattias: ['en-GB', 'en-US'], joel: ['en-GB', 'en-AU', 'en-US'], alvaro: ['en-CA', 'en-US'], paul: ['en-GB', 'en-US'], local: ['en-US', 'en-GB'], narrator: ['en-US', 'en-GB'] };
 function normLang(l) { return l.replace('_', '-'); }
 function autoVoice(role) {
   const langs = ROLE_LANGS[role] || ['en-US'];
@@ -101,7 +138,7 @@ function loadVoices() {
 }
 if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
-// role: 'lars' | 'mike' | 'erik' | 'narrator'
+// role: 'mattias' | 'joel' | 'alvaro' | 'paul' | 'local' | 'narrator'
 function speak(text, rate = S.rate, role = 'narrator') {
   return new Promise(res => {
     if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return res(); }
@@ -224,9 +261,9 @@ function updateChip() {
   const m = Math.floor(todayStats().secs / 60);
   $('#todayChip').textContent = `${m} / ${S.goal} min`;
 }
-function streak() {
+function streak(stats = D.stats, goal = S.goal) {
   let n = 0; const d = new Date();
-  const met = k => (D.stats[k]?.secs || 0) >= S.goal * 60;
+  const met = k => (stats[k]?.secs || 0) >= goal * 60;
   if (!met(dayKey(d))) d.setDate(d.getDate() - 1);
   while (met(dayKey(d))) { n++; d.setDate(d.getDate() - 1); }
   return n;
@@ -235,7 +272,8 @@ function updateHome() {
   updateChip();
   const st = todayStats(), m = Math.floor(st.secs / 60);
   const h = new Date().getHours();
-  $('#homeGreeting').textContent = h < 12 ? 'Good morning' : h < 20 ? 'Good afternoon' : 'Good evening';
+  const nm = me().name && me().name !== 'Yo' ? ', ' + me().name.split(' ')[0] : '';
+  $('#homeGreeting').textContent = (h < 12 ? 'Good morning' : h < 20 ? 'Good afternoon' : 'Good evening') + nm;
   $('#homeSub').textContent = m >= S.goal ? '¡Meta de hoy cumplida! Cada minuto extra suma.' : `Te faltan ${S.goal - m} min para tu meta de ${S.goal}.`;
   $('#meterFill').style.width = Math.min(100, st.secs / (S.goal * 60) * 100) + '%';
   $('#minsToday').textContent = `${m} min hoy`;
@@ -243,6 +281,8 @@ function updateHome() {
   $('#r-dict').classList.toggle('done', st.dict >= 5);
   $('#r-spell').classList.toggle('done', st.spell >= 5);
   $('#r-talk').classList.toggle('done', st.talk >= 4);
+  $('#r-listen').classList.toggle('done', st.listen >= 1);
+  const u = me(); $('#btnUser').textContent = initials(u.name); $('#btnUser').style.setProperty('--uc', USER_COLORS[u.color] || USER_COLORS[0]);
   $('#r-notes').classList.toggle('done', st.notes >= 1);
   const days = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
   let html = '';
@@ -301,16 +341,18 @@ const STRICTNESS = {
   SCENARIOS.filter(s => s.group === g).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; og.appendChild(o); });
   $('#scenario').appendChild(og);
 });
-// Sugerir a Erik para temas de jefatura
+// Sugerir a Paul para temas de jefatura y proyectos
 $('#scenario').addEventListener('change', () => {
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
-  if (sc.group === 'Supervisión y jefatura' && $('#persona').value !== 'erik') $('#persona').value = 'erik';
+  if ((sc.group === 'Supervisión y jefatura' || sc.id === 'upgrade' || sc.id === 'progress') ) $('#persona').value = 'paul';
 });
 
 function talkSystem() {
   const sc = SCENARIOS.find(s => s.id === $('#scenario').value), p = PERSONAS[$('#persona').value];
   return `You are ${p.en}
-You are visiting a sawmill in Chile that uses Swedish and Canadian machinery. You are talking with a Chilean sawmill worker who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
+You are visiting a sawmill in Chile.
+MILL CONTEXT: ${MILL_CONTEXT}
+You are talking with a Chilean sawmill worker who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
 SCENARIO: ${sc.en}
 
 RULES FOR YOUR REPLY:
@@ -559,12 +601,13 @@ $('#dictAI').onclick = async () => {
   const TOPIC_EN = { seguridad: 'safety', mantenimiento: 'maintenance', produccion: 'production', fallas: 'breakdowns and troubleshooting',
     social: 'small talk with visiting technicians', recepcion: 'log yard and log receiving', descortezador: 'ring debarker', resierra: 'resaw',
     trimmer: 'trimmer and optimizer', buzones: 'sorter bins', stacker: 'stacker and stickers', enzunchado: 'package strapping',
-    antimancha: 'anti-sapstain dip treatment', pintado: 'package end painting and marking', supervision: 'supervisor and management meetings, KPIs, planning' };
+    antimancha: 'anti-sapstain dip treatment', pintado: 'package end painting and marking', supervision: 'supervisor and management meetings, KPIs, planning',
+    canteadora: 'the new USNR edger with the BioLuma grade scanner and optimizer', proyecto: 'the sawmill upgrade project (remove return line, double infeed, two primary machines, two chipper canters, 28,000 to 45,000 cubic meters)' };
   const topic = TOPIC_EN[dict.cat] || 'mixed sawmill topics';
   try {
     const r = await gemini(
       `You create listening dictation exercises for a Chilean sawmill worker learning English (CEFR ${S.level}).`,
-      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that Swedish or Canadian service technicians or coworkers would really say at a sawmill. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
+      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that USNR service technicians (Swedish or Canadian) or coworkers would really say at a sawmill. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
     dict.aiItems = (r.items || []).filter(x => x.en);
     if (!dict.aiItems.length) throw new Error('No llegaron frases.');
     loadDict('ia'); toast('Frases nuevas listas. Toca ▶ Escuchar.');
@@ -812,9 +855,11 @@ $('#autoSend').addEventListener('change', e => { S.autoSend = e.target.checked; 
 $('#autoSpeak').addEventListener('change', e => { S.autoSpeak = e.target.checked; persist(); });
 $$('.voice-sel').forEach(sel => sel.addEventListener('change', e => { S.voices[sel.dataset.role] = e.target.value; persist(); }));
 const TEST_LINES = {
-  lars: ["Hi, I'm Lars. Let's check the edger together.", 'lars'],
-  mike: ["Hey, I'm Mike. How's the trimmer running today?", 'mike'],
-  erik: ["Good morning, I'm Erik. Let's review the project schedule.", 'erik'],
+  mattias: ["Hi, I'm Mattias. Let's check the edger together.", 'mattias'],
+  joel: ["Hey, I'm Joel. I'll take care of the scanner today.", 'joel'],
+  alvaro: ["Hi, I'm Alvaro. How's the trimmer running today?", 'alvaro'],
+  paul: ["Good morning, I'm Paul. Let's review the project schedule.", 'paul'],
+  local: ["Hi, I'm Carlos, the shift supervisor.", 'local'],
   narrator: ['The saw blades are ready. Please check the tension.', 'narrator']
 };
 $$('[data-test]').forEach(b => b.onclick = () => { const [line, role] = TEST_LINES[b.dataset.test]; speak(line, S.rate, role); });
@@ -868,9 +913,288 @@ $('#btnReset').onclick = () => {
   D.stats = {}; D.notes = []; persist(); updateHome(); toast('Progreso borrado.');
 };
 
+/* ============ Listening (conversaciones para escuchar) ============ */
+const TOPIC_COLORS = { edger: 'var(--c-spell)', upgrade: 'var(--c-talk)', ops: 'var(--c-dict)', social: 'var(--c-notes)', ai: 'var(--c-listen)' };
+const SPEAKER_COLORS = ['var(--c-talk)', 'var(--c-home)', 'var(--c-dict)'];
+const lst = { topic: 'all', dlg: null, showText: false, showEs: false, answers: {} };
+function customDialogs() { try { return JSON.parse(localStorage.getItem('me_dialogs') || '[]'); } catch { return []; } }
+function saveCustomDialogs(list) { try { localStorage.setItem('me_dialogs', JSON.stringify(list.slice(0, 40))); } catch {} }
+function allDialogs() { return [...customDialogs(), ...DIALOGS]; }
+const LEVEL_ORDER = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+function renderListenList() {
+  const topics = { all: 'Todas', ...LISTEN_TOPICS, ai: 'Creadas con IA' };
+  $('#listenTopics').innerHTML = Object.entries(topics).map(([k, v]) => `<button class="chip ${k === lst.topic ? 'on' : ''}" data-t="${k}">${v}</button>`).join('');
+  $$('#listenTopics .chip').forEach(b => b.onclick = () => { lst.topic = b.dataset.t; renderListenList(); });
+  const myLvl = LEVEL_ORDER.indexOf(S.level);
+  let list = allDialogs().filter(d => lst.topic === 'all' || d.topic === lst.topic);
+  // Primero las de tu nivel o cercanas
+  list.sort((a, b) => Math.abs(LEVEL_ORDER.indexOf(a.level) - myLvl) - Math.abs(LEVEL_ORDER.indexOf(b.level) - myLvl));
+  $('#listenList').innerHTML = list.length ? list.map(d => {
+    const done = D.listened[d.id];
+    return `<button class="dlg-card" data-id="${esc(d.id)}" style="--tc:${TOPIC_COLORS[d.topic] || 'var(--c-listen)'}">
+      <div class="t"><strong>${esc(d.title)}</strong>
+      <span class="badge">${esc(LISTEN_TOPICS[d.topic] || 'IA')}</span><span class="badge lvl">${esc(d.level)}</span>
+      <small>${esc(d.speakers.A[0])} y ${esc(d.speakers.B[0])}</small></div>
+      ${done !== undefined ? `<span class="dlg-score">${done}%</span>` : ''}</button>`;
+  }).join('') : '<div class="empty">No hay conversaciones en este tema todavía. Crea una con IA abajo.</div>';
+  $$('#listenList .dlg-card').forEach(b => b.onclick = () => openDialog(b.dataset.id));
+}
+function openDialog(id) {
+  const d = allDialogs().find(x => x.id === id); if (!d) return;
+  lst.dlg = d; lst.answers = {}; lst.showText = false; lst.showEs = S.level === 'A1';
+  $('#listenBrowse').hidden = true; $('#listenPlayer').hidden = false; $('#main').scrollTop = 0;
+  $('#lpTitle').textContent = d.title; $('#lpContext').textContent = d.context || '';
+  $('#lpResult').innerHTML = '';
+  renderTranscript(); renderQuestions();
+}
+function speakerColor(d, key) { return SPEAKER_COLORS[Object.keys(d.speakers).indexOf(key)] || 'var(--c-listen)'; }
+function renderTranscript() {
+  const d = lst.dlg;
+  $('#lpShowText').textContent = lst.showText ? 'Ocultar texto' : 'Mostrar texto';
+  $('#lpShowEs').textContent = lst.showEs ? 'Ocultar traducción' : 'Mostrar traducción';
+  $('#lpLines').innerHTML = d.lines.map(([sp, en, es], i) => `<div class="tline" data-i="${i}" style="--sc:${speakerColor(d, sp)}">
+    <span class="sp">${esc(d.speakers[sp][0])}:</span> <span class="en ${lst.showText ? '' : 'hide'}">${esc(en)}</span>
+    ${lst.showEs ? `<div class="es">${esc(es)}</div>` : ''}</div>`).join('');
+  $$('#lpLines .tline').forEach(el => el.onclick = () => playLines(+el.dataset.i, +el.dataset.i, S.rate));
+}
+function renderQuestions() {
+  const d = lst.dlg;
+  // Las opciones se muestran en orden aleatorio
+  $('#lpQuestions').innerHTML = d.questions.map((q, qi) => `<div class="q" data-q="${qi}"><strong>${qi + 1}. ${esc(q.q)}</strong>
+    <div class="qes">${esc(q.es || '')}</div>
+    ${shuffle(q.o.map((o, oi) => [o, oi])).map(([o, oi]) => `<button data-o="${oi}">${esc(o)}</button>`).join('')}</div>`).join('');
+  $$('#lpQuestions .q').forEach(box => box.querySelectorAll('button').forEach(b => b.onclick = () => answerQ(+box.dataset.q, +b.dataset.o, box)));
+}
+function answerQ(qi, oi, box) {
+  if (lst.answers[qi] !== undefined) return;
+  const q = lst.dlg.questions[qi]; lst.answers[qi] = oi === q.a;
+  box.querySelectorAll('button').forEach(b => { const i = +b.dataset.o; if (i === q.a) b.classList.add('right'); else if (i === oi) b.classList.add('wrong'); });
+  const n = Object.keys(lst.answers).length;
+  if (n === lst.dlg.questions.length) {
+    const good = Object.values(lst.answers).filter(Boolean).length;
+    const pct = Math.round(good / n * 100);
+    const first = D.listened[lst.dlg.id] === undefined;
+    D.listened[lst.dlg.id] = Math.max(pct, D.listened[lst.dlg.id] || 0);
+    if (first || !todayStats().listen) bump('listen'); else persist();
+    $('#lpResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 60 ? 'var(--c-home)' : 'var(--bad)'}">${good} de ${n} correctas</div>
+      <p class="muted">${pct === 100 ? '¡Excelente comprensión!' : 'Escucha otra vez con el texto visible para ver lo que se te escapó.'}</p>`;
+  }
+}
+let playToken = 0;
+async function playLines(from, to, rate) {
+  const d = lst.dlg, token = ++playToken;
+  speechSynthesis.cancel();
+  const roles = Object.fromEntries(Object.entries(d.speakers).map(([k, v]) => [k, v[1]]));
+  // Si los dos hablantes quedan con la misma voz, cambiamos el tono del segundo
+  const sameVoice = voiceFor(roles.A)?.name === voiceFor(roles.B)?.name;
+  $('#lpPlay').textContent = '■ Detener';
+  for (let i = from; i <= to; i++) {
+    if (token !== playToken) return;
+    $$('#lpLines .tline').forEach(el => el.classList.toggle('now', +el.dataset.i === i));
+    const [sp, en] = d.lines[i];
+    await speakAs(en, rate, roles[sp], sameVoice && sp === 'B' ? 1.2 : null);
+    await wait(350);
+  }
+  if (token === playToken) { $$('#lpLines .tline').forEach(el => el.classList.remove('now')); $('#lpPlay').textContent = '▶ Escuchar conversación'; }
+}
+function speakAs(text, rate, role, pitchOverride) {
+  return new Promise(res => {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = voiceFor(role); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en-US';
+    u.rate = rate; u.pitch = pitchOverride || (role === 'local' || role === 'narrator' ? 1 : S.pitch);
+    u.onend = res; u.onerror = res; speechSynthesis.speak(u);
+  });
+}
+$('#lpPlay').onclick = () => {
+  if ($('#lpPlay').textContent.startsWith('■')) { playToken++; speechSynthesis.cancel(); $('#lpPlay').textContent = '▶ Escuchar conversación'; $$('#lpLines .tline').forEach(el => el.classList.remove('now')); return; }
+  playLines(0, lst.dlg.lines.length - 1, S.rate);
+};
+$('#lpSlow').onclick = () => playLines(0, lst.dlg.lines.length - 1, 0.7);
+$('#lpShowText').onclick = () => { lst.showText = !lst.showText; renderTranscript(); };
+$('#lpShowEs').onclick = () => { lst.showEs = !lst.showEs; renderTranscript(); };
+$('#listenBack').onclick = () => { playToken++; speechSynthesis.cancel(); $('#listenPlayer').hidden = true; $('#listenBrowse').hidden = false; renderListenList(); };
+$('#listenAI').onclick = async () => {
+  const btn = $('#listenAI'); btn.disabled = true; btn.textContent = 'Creando conversación…';
+  try {
+    const r = await gemini(
+      `You write realistic listening-practice dialogues for Chilean sawmill workers learning English. ${MILL_CONTEXT}
+Available speakers (use exactly these role ids): "mattias" (Swedish USNR technician), "joel" (Swedish USNR scanner specialist), "alvaro" (Canadian USNR technician), "paul" (Swedish USNR project manager), "local" (a Chilean worker, supervisor or manager: invent a Chilean first name).`,
+      [{ role: 'user', parts: [{ text: `Write one dialogue between two speakers about: ${$('#listenAITopic').value}. CEFR level ${S.level}. 8 to 10 lines, natural spoken English as it would really happen at the mill. Then write 3 multiple-choice comprehension questions with 3 options each.
+Respond ONLY with JSON:
+{"title_es":"short title in Spanish","context_es":"one sentence in Spanish describing the situation","speakers":{"A":{"name":"...","role":"mattias|joel|alvaro|paul|local"},"B":{"name":"...","role":"..."}},"lines":[{"s":"A","en":"...","es":"Spanish (Chile) translation"}],"questions":[{"q":"question in English","es":"question in Spanish","options":["...","...","..."],"answer":0}]}` }] }], 0.9);
+    const ok = ['mattias', 'joel', 'alvaro', 'paul', 'local'];
+    const sp = k => [r.speakers[k].name, ok.includes(r.speakers[k].role) ? r.speakers[k].role : 'local'];
+    const d = { id: 'ai-' + Date.now(), topic: 'ai', level: S.level, title: r.title_es || 'Conversación nueva', context: r.context_es || '',
+      speakers: { A: sp('A'), B: sp('B') },
+      lines: (r.lines || []).filter(l => l.en && r.speakers[l.s]).map(l => [l.s, l.en, l.es || '']),
+      questions: (r.questions || []).filter(q => q.options && q.options.length).map(q => ({ q: q.q, es: q.es, o: q.options, a: Math.min(+q.answer || 0, q.options.length - 1) })) };
+    if (d.lines.length < 3) throw new Error('La conversación llegó incompleta. Intenta de nuevo.');
+    saveCustomDialogs([d, ...customDialogs()]);
+    openDialog(d.id);
+    toast('Conversación nueva lista. Toca ▶ para escucharla.');
+  } catch (e) { toast(aiErrorMsg(e), 4000); }
+  finally { btn.disabled = false; btn.textContent = 'Generar conversación'; }
+};
+
+/* ============ Usuarios ============ */
+let editingUser = null, pickedColor = 0;
+function userSummary(id) {
+  const d = id === P.current ? D : dataOf(id), st = d.stats || {};
+  const u = P.list.find(x => x.id === id);
+  const today = Math.floor((st[dayKey()]?.secs || 0) / 60);
+  const total = Math.floor(Object.values(st).reduce((a, x) => a + (x.secs || 0), 0) / 60);
+  return { today, total, streak: streak(st, u.goal || 20), notes: (d.notes || []).length };
+}
+function renderUsers() {
+  $('#uLevel').innerHTML = $('#level').innerHTML;
+  $('#userList').innerHTML = P.list.map(u => {
+    const sm = userSummary(u.id), c = USER_COLORS[u.color] || USER_COLORS[0];
+    return `<div class="user-card ${u.id === P.current ? 'current' : ''}" style="--uc:${c}">
+      <div class="avatar" style="--uc:${c}">${esc(initials(u.name))}</div>
+      <div class="info"><strong>${esc(u.name)}</strong><small>${esc(u.role || 'Sin cargo')} · ${esc(u.level || 'A2')}</small>
+      <small>Hoy ${sm.today} min · Racha ${sm.streak} · Total ${sm.total} min</small></div>
+      <div class="acts">${u.id === P.current ? '<span class="badge" style="--tc:var(--c-users)">Activo</span>' : `<button class="btn small primary" data-use="${u.id}">Usar</button>`}
+      <button class="btn small ghost" data-edit="${u.id}">✎</button></div></div>`;
+  }).join('');
+  $$('[data-use]').forEach(b => b.onclick = () => switchUser(b.dataset.use));
+  $$('[data-edit]').forEach(b => b.onclick = () => openUserForm(b.dataset.edit));
+  $('#teamUrl').value = S.teamUrl || '';
+  $('#syncStatus').textContent = S.lastSync ? `Última sincronización: ${new Date(S.lastSync).toLocaleString('es-CL')}` : '';
+}
+function openUserForm(id) {
+  editingUser = id || null;
+  const u = id ? P.list.find(x => x.id === id) : { name: '', role: '', level: S.level, color: P.list.length % USER_COLORS.length };
+  $('#uFormTitle').textContent = id ? 'Editar usuario' : 'Nuevo usuario';
+  $('#uName').value = u.name; $('#uRole').value = u.role || ''; $('#uLevel').value = u.level || 'A2';
+  pickedColor = u.color || 0; renderColors();
+  $('#userForm').hidden = false; $('#btnAddUser').hidden = true;
+  let del = $('#uDelete');
+  if (id && P.list.length > 1) {
+    if (!del) { del = document.createElement('button'); del.id = 'uDelete'; del.className = 'btn danger'; del.textContent = 'Eliminar usuario'; $('#userForm').appendChild(del); }
+    del.hidden = false; del.onclick = () => deleteUser(id);
+  } else if (del) del.hidden = true;
+  $('#uName').focus();
+}
+function renderColors() {
+  $('#uColors').innerHTML = USER_COLORS.map((c, i) => `<button style="background:${c}" class="${i === pickedColor ? 'on' : ''}" data-c="${i}" aria-label="Color ${i + 1}"></button>`).join('');
+  $$('#uColors button').forEach(b => b.onclick = () => { pickedColor = +b.dataset.c; renderColors(); });
+}
+$('#btnAddUser').onclick = () => openUserForm(null);
+$('#uCancel').onclick = () => { $('#userForm').hidden = true; $('#btnAddUser').hidden = false; };
+$('#uSave').onclick = () => {
+  const name = $('#uName').value.trim();
+  if (!name) { toast('Escribe un nombre.'); return; }
+  if (editingUser) {
+    const u = P.list.find(x => x.id === editingUser);
+    Object.assign(u, { name, role: $('#uRole').value.trim(), level: $('#uLevel').value, color: pickedColor });
+    if (u.id === P.current) S.level = u.level;
+    persist(); $('#userForm').hidden = true; $('#btnAddUser').hidden = false; renderUsers(); updateHome(); initSettings();
+  } else {
+    const u = { id: newId(), name, role: $('#uRole').value.trim(), level: $('#uLevel').value, goal: 20, color: pickedColor, created: Date.now() };
+    P.list.push(u); persist();
+    switchUser(u.id);
+  }
+};
+function switchUser(id) {
+  syncNow(true);
+  persist();
+  P.current = id;
+  try { localStorage.setItem('me_profiles', JSON.stringify(P)); } catch {}
+  location.href = location.pathname + '?v=users';
+}
+function deleteUser(id) {
+  const u = P.list.find(x => x.id === id);
+  if (!confirm(`¿Eliminar a ${u.name} y todo su progreso en este teléfono?`)) return;
+  P.list = P.list.filter(x => x.id !== id);
+  try { localStorage.removeItem('me_data_' + id); } catch {}
+  if (P.current === id) { P.current = P.list[0].id; try { localStorage.setItem('me_profiles', JSON.stringify(P)); } catch {} location.reload(); return; }
+  persist(); $('#userForm').hidden = true; $('#btnAddUser').hidden = false; renderUsers();
+}
+
+/* ============ Seguimiento del equipo (Google Sheets) ============ */
+var syncTimer = null;
+function scheduleSync() {
+  if (!S.teamUrl) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(), 20000);
+}
+function syncPayload() {
+  const u = me(), st = todayStats(), total = Object.values(D.stats).reduce((a, x) => a + (x.secs || 0), 0);
+  return { user_id: u.id, name: u.name, role: u.role || '', level: S.level, date: dayKey(),
+    minutes: Math.round(st.secs / 60), dict: st.dict, spell: st.spell, talk: st.talk, listen: st.listen || 0,
+    notes: D.notes.length, streak: streak(), totalMinutes: Math.round(total / 60) };
+}
+function syncNow(beacon = false) {
+  if (!S.teamUrl || me().name === 'Yo') return false;
+  const body = JSON.stringify(syncPayload());
+  try {
+    if (beacon && navigator.sendBeacon) navigator.sendBeacon(S.teamUrl, new Blob([body], { type: 'text/plain' }));
+    else fetch(S.teamUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body });
+    S.lastSync = Date.now();
+    try { localStorage.setItem('me_settings', JSON.stringify(S)); } catch {}
+    return true;
+  } catch { return false; }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) syncNow(true); });
+$('#teamUrl').addEventListener('change', e => {
+  const v = e.target.value.trim();
+  if (v && !/^https:\/\/script\.google(usercontent)?\.com\//.test(v)) { toast('El enlace debe empezar con https://script.google.com/…'); return; }
+  S.teamUrl = v; persist(); toast(v ? 'Planilla del equipo conectada.' : 'Seguimiento desconectado.');
+});
+$('#btnSyncNow').onclick = () => {
+  if (!S.teamUrl) { toast('Primero pega el enlace de la planilla del equipo.'); return; }
+  if (me().name === 'Yo') { toast('Ponle tu nombre a tu usuario (✎) antes de sincronizar.'); return; }
+  syncNow(); renderUsers(); toast('Progreso enviado a la planilla del equipo.');
+};
+$('#btnInvite').onclick = async () => {
+  if (!S.teamUrl) { toast('Primero conecta la planilla del equipo.'); return; }
+  const link = location.origin + location.pathname + '?equipo=' + encodeURIComponent(S.teamUrl);
+  const text = `Te invito a practicar inglés para el aserradero con Mill English. Abre este enlace en Chrome, instala la app y crea tu usuario: ${link}`;
+  try {
+    if (navigator.share) await navigator.share({ title: 'Mill English', text });
+    else { await navigator.clipboard.writeText(text); toast('Invitación copiada. Pégala en WhatsApp o correo.'); }
+  } catch {}
+};
+$('#btnTeamPanel').onclick = async () => {
+  if (!S.teamUrl) { toast('Primero conecta la planilla del equipo.'); return; }
+  const box = $('#teamPanel'); box.innerHTML = '<p class="muted">Cargando avance del equipo…</p>';
+  try {
+    const res = await fetch(S.teamUrl);
+    const rows = await res.json();
+    const since = new Date(); since.setDate(since.getDate() - 6); const sinceKey = dayKey(since);
+    const byUser = {};
+    rows.forEach(r => {
+      const u = byUser[r.id] || (byUser[r.id] = { name: r.usuario, role: r.cargo, level: r.nivel, week: 0, today: 0, streak: 0, last: '' });
+      if (r.fecha >= sinceKey) u.week += +r.minutos || 0;
+      if (r.fecha === dayKey()) u.today = +r.minutos || 0;
+      if (r.fecha >= u.last) { u.last = r.fecha; u.streak = +r.racha || 0; u.name = r.usuario; u.role = r.cargo; u.level = r.nivel; }
+    });
+    const list = Object.values(byUser).sort((a, b) => b.week - a.week);
+    if (!list.length) { box.innerHTML = '<p class="muted">Todavía no hay datos. Cada compañero debe practicar con la planilla conectada.</p>'; return; }
+    const max = Math.max(...list.map(u => u.week), 1);
+    box.innerHTML = `<p class="muted small">Minutos de práctica en los últimos 7 días</p>` + list.map(u => `<div class="team-row">
+      <div class="top"><strong>${esc(u.name)}</strong><span>${u.week} min</span></div>
+      <small>${esc(u.role || '')} · ${esc(u.level || '')} · Hoy ${u.today} min · Racha ${u.streak} · Último día ${esc(u.last)}</small>
+      <div class="bar"><div style="width:${Math.round(u.week / max * 100)}%"></div></div></div>`).join('');
+  } catch {
+    box.innerHTML = '<p class="muted">No se pudo leer el panel desde la app. Puedes ver el avance directamente en la planilla de Google Sheets.</p>';
+  }
+};
+
 /* ============ Inicio de la app ============ */
 initSettings();
 applyDictMode();
 updateHome();
+// Invitación de equipo (?equipo=...) y regreso tras cambiar de usuario (?v=users)
+(() => {
+  const q = new URLSearchParams(location.search);
+  const team = q.get('equipo');
+  if (team && /^https:\/\/script\.google(usercontent)?\.com\//.test(team)) {
+    S.teamUrl = team; persist();
+    toast('Te uniste al seguimiento del equipo. Crea tu usuario con tu nombre.', 4500);
+    show('users'); if (me().name === 'Yo') openUserForm(me().id);
+  } else if (q.get('v') === 'users') show('users');
+  if (q.toString()) history.replaceState(null, '', location.pathname);
+})();
 renderDictCats();
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
