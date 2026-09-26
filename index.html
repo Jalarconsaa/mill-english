@@ -17,6 +17,7 @@
 <header class="topbar">
   <div class="brand"><span class="stamp">Mill English</span></div>
   <div class="today-chip" id="todayChip">0 / 20 min</div>
+  <button class="icon-btn tutor-btn" id="btnTutor" aria-label="Tutor de dudas">💬</button>
   <button class="avatar" id="btnUser" aria-label="Usuarios">?</button>
   <button class="icon-btn" id="btnSettings" aria-label="Ajustes">⚙︎</button>
 </header>
@@ -33,13 +34,18 @@
       <div class="meter-labels"><span id="minsToday">0 min</span><span id="streak">Racha: 0 días</span></div>
     </div>
 
+    <div class="notice test-notice" id="testNotice" hidden>
+      <p><strong>¿Cuál es tu nivel de inglés?</strong> Haz el test de 15 preguntas (unos 8 minutos) y la app se ajustará a ti.</p>
+      <button class="btn primary" data-go-test>Hacer test de nivel</button>
+    </div>
+
     <h2 class="section-title">Rutina de hoy</h2>
     <ol class="routine">
       <li data-go="dict" id="r-dict"><span class="tick"></span><div><strong>Dictado</strong><span>5–10 min · escucha y escribe frases del trabajo</span></div></li>
       <li data-go="spell" id="r-spell"><span class="tick"></span><div><strong>Deletreo</strong><span>3–5 min · palabras, códigos y alfabeto fonético</span></div></li>
       <li data-go="listen" id="r-listen"><span class="tick"></span><div><strong>Listening</strong><span>5 min · escucha una conversación y responde</span></div></li>
       <li data-go="talk" id="r-talk"><span class="tick"></span><div><strong>Conversación</strong><span>5–15 min · habla con un técnico virtual</span></div></li>
-      <li data-go="notes" id="r-notes"><span class="tick"></span><div><strong>Repaso de errores</strong><span>2 min · lo que más te cuesta</span></div></li>
+      <li data-go="notes" id="r-notes"><span class="tick"></span><div><strong>Repaso con tarjetas</strong><span>3 min · vocabulario y tus errores, justo antes de olvidarlos</span></div></li>
     </ol>
 
     <h2 class="section-title">Últimos 7 días</h2>
@@ -219,11 +225,68 @@
 
   <!-- ERRORES -->
   <section class="view" id="view-notes">
+    <div class="seg" id="reviewModes">
+      <button class="on" data-rv="cards">🃏 Tarjetas</button>
+      <button data-rv="notes">📒 Mis errores</button>
+    </div>
+    <div id="cardsPanel">
+      <div class="progress-line"><span id="cardsCount"></span><span id="cardsStats"></span></div>
+      <div class="flashcard" id="flashcard">
+        <div class="fc-kind" id="fcKind"></div>
+        <div class="fc-front" id="fcFront"></div>
+        <div class="fc-back" id="fcBack" hidden></div>
+      </div>
+      <button class="play" id="fcShow">Mostrar respuesta</button>
+      <div class="fc-grade" id="fcGrade" hidden>
+        <button class="btn fc-again" data-g="0">No me acordé</button>
+        <button class="btn fc-good" data-g="1">Me acordé</button>
+        <button class="btn fc-easy" data-g="2">Fácil</button>
+      </div>
+      <p class="muted small fc-help">Las tarjetas que recuerdas vuelven cada vez más espaciadas (1, 3, 7, 14, 30 días). Las que olvidas vuelven pronto.</p>
+    </div>
+    <div id="notesPanel" hidden>
     <div class="notes-head">
       <p class="muted" id="notesSummary"></p>
       <button class="btn primary" id="notesPractice">Practicar en dictado</button>
     </div>
     <div id="notesList"></div>
+    </div>
+  </section>
+
+  <!-- TUTOR -->
+  <section class="view" id="view-tutor">
+    <div class="chips" id="tutorChips">
+      <button class="chip" data-q="¿Cuándo uso since y cuándo for?">Since o for</button>
+      <button class="chip" data-q="¿Cómo digo en inglés 'se botó el automático'?">«Se botó el automático»</button>
+      <button class="chip" data-q="¿Cómo le pido a un técnico que hable más lento sin sonar mal educado?">Pedir que hable lento</button>
+      <button class="chip" data-q="¿Cuál es la diferencia entre make y do?">Make o do</button>
+      <button class="chip" data-q="¿Cómo explico una falla de una máquina paso a paso en inglés?">Explicar una falla</button>
+    </div>
+    <div class="chat" id="tutorChat">
+      <div class="hints"><strong>Tutor de dudas</strong><br>Pregúntame en español lo que quieras sobre inglés: gramática, cómo decir algo del trabajo, pronunciación o palabras que no entiendas.</div>
+    </div>
+    <div class="composer">
+      <div class="composer-row">
+        <textarea id="tutorInput" rows="2" placeholder="Escribe tu duda…"></textarea>
+        <button class="mic" id="tutorMic" aria-label="Dictar pregunta">🎙</button>
+        <button class="send" id="tutorSend" aria-label="Enviar">➤</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEST DE NIVEL -->
+  <section class="view" id="view-test">
+    <div id="testIntro" class="card-plain">
+      <h2 class="player-title">Test de nivel</h2>
+      <p>15 preguntas de vocabulario, gramática y comprensión auditiva, de más fácil a más difícil. En las preguntas con 🔊 escucha el audio antes de responder. Si no sabes una respuesta, elige "No sé": así el resultado es más exacto.</p>
+      <button class="btn primary wide" id="testStart">Empezar</button>
+    </div>
+    <div id="testBody" hidden>
+      <div class="progress-line"><span id="testCount"></span><span id="testLevelTag"></span></div>
+      <div class="meter"><div class="meter-fill" id="testMeter"></div></div>
+      <div class="q test-q" id="testQ"></div>
+    </div>
+    <div id="testResult" hidden></div>
   </section>
 
   <!-- AJUSTES -->
@@ -260,6 +323,7 @@
           <option value="C2">Casi nativo (C2)</option>
         </select>
       </label>
+      <button class="btn ghost" data-go-test>Hacer test de nivel</button>
       <label>Meta diaria
         <select id="goal">
           <option value="15">15 minutos</option>
@@ -330,7 +394,7 @@
   <button data-view="listen"><span>👂</span>Listening</button>
   <button data-view="dict"><span>🎧</span>Dictado</button>
   <button data-view="spell"><span>🔤</span>Deletreo</button>
-  <button data-view="notes"><span>📒</span>Errores</button>
+  <button data-view="notes"><span>🃏</span>Repaso</button>
 </nav>
 
 <div class="toast" id="toast" role="status"></div>

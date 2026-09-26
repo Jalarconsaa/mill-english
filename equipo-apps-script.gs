@@ -6,7 +6,7 @@
  */
 const HOJA = 'Registro';
 const COLS = ['Fecha', 'Usuario', 'Cargo / área', 'Nivel', 'Minutos', 'Dictados', 'Deletreos',
-  'Conversaciones', 'Listening', 'Errores guardados', 'Racha (días)', 'Minutos totales', 'Actualizado', 'ID'];
+  'Conversaciones', 'Listening', 'Errores guardados', 'Racha (días)', 'Minutos totales', 'Actualizado', 'ID', 'Tarjetas'];
 
 function hoja_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -18,6 +18,7 @@ function hoja_() {
     sh.getRange(1, 1, 1, COLS.length).setFontWeight('bold').setBackground('#F2B705');
     sh.getRange('A:A').setNumberFormat('@'); // la fecha se guarda como texto AAAA-MM-DD
   }
+  if (sh.getRange(1, 15).getValue() === '') sh.getRange(1, 15).setValue('Tarjetas').setFontWeight('bold').setBackground('#F2B705');
   return sh;
 }
 function fecha_(v) {
@@ -32,7 +33,7 @@ function doPost(e) {
     const d = JSON.parse(e.postData.contents);
     const sh = hoja_();
     const fila = [String(d.date), d.name, d.role, d.level, d.minutes, d.dict, d.spell, d.talk, d.listen,
-      d.notes, d.streak, d.totalMinutes, new Date(), d.user_id];
+      d.notes, d.streak, d.totalMinutes, new Date(), d.user_id, d.cards || 0];
     const datos = sh.getDataRange().getValues();
     for (let i = datos.length - 1; i >= 1; i--) {
       if (String(datos[i][13]) === String(d.user_id) && fecha_(datos[i][0]) === String(d.date)) {
@@ -54,7 +55,7 @@ function doGet() {
   const limite = Utilities.formatDate(desde, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const filas = datos.filter(r => fecha_(r[0]) >= limite).map(r => ({
     fecha: fecha_(r[0]), usuario: r[1], cargo: r[2], nivel: r[3], minutos: r[4], dictados: r[5], deletreos: r[6],
-    conversaciones: r[7], listening: r[8], errores: r[9], racha: r[10], total: r[11], id: String(r[13])
+    conversaciones: r[7], listening: r[8], errores: r[9], racha: r[10], total: r[11], id: String(r[13]), tarjetas: r[14] || 0
   }));
   return ContentService.createTextOutput(JSON.stringify(filas)).setMimeType(ContentService.MimeType.JSON);
 }

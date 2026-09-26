@@ -250,3 +250,29 @@ const PERSONAS = {
   alvaro: { name:"Álvaro", es:"Álvaro, técnico de Canadá (también habla español)", en:"Álvaro, a Canadian service technician (a man) from USNR in British Columbia. You speak natural North American English and you also speak Spanish (your parents are Latin American). You always speak English, but if the learner is clearly lost or writes in Spanish, you may add ONE short clarification in Spanish in parentheses, then continue in English." },
   paul: { name:"Paul", es:"Paul, jefe de proyecto sueco", en:"Paul, a Swedish project manager (a man) from USNR. Professional, organized, focused on results, schedule, safety and costs. Clear international English." }
 };
+
+// Test de nivel: 3 preguntas por nivel, de A1 a C1 (una de cada nivel es de listening)
+const TEST_QUESTIONS = [
+  { lvl: 'A1', q: 'Where ___ the emergency stop?', es: '¿Dónde está la parada de emergencia?', o: ['is', 'are', 'am'], a: 0 },
+  { lvl: 'A1', q: 'How do you say "casco" in English?', o: ['hard hat', 'hard shoe', 'head glass'], a: 0 },
+  { lvl: 'A1', audio: 'Please close the door.', q: 'What does he ask?', es: '¿Qué pide?', o: ['Close the door', 'Open the window', 'Stop the line'], a: 0 },
+  { lvl: 'A2', q: 'Yesterday we ___ the saw blades.', o: ['changed', 'change', 'changing'], a: 0 },
+  { lvl: 'A2', q: 'The bearing is too hot. It is ___.', o: ['overheating', 'overeating', 'overcooking'], a: 0 },
+  { lvl: 'A2', audio: 'The trucks will arrive on Thursday morning, not on Wednesday.', q: 'When will the trucks arrive?', es: '¿Cuándo llegan los camiones?', o: ['Thursday morning', 'Wednesday morning', 'Thursday night'], a: 0 },
+  { lvl: 'B1', q: 'If the scanner ___ dirty, the readings will be wrong.', o: ['is', 'will be', 'was being'], a: 0 },
+  { lvl: 'B1', q: 'We have been waiting for the spare part ___ three weeks.', o: ['for', 'since', 'during'], a: 0 },
+  { lvl: 'B1', audio: "I'd check the air supply first, and if that doesn't work, give us a call.", q: 'What should they do first?', es: '¿Qué deben hacer primero?', o: ['Check the air supply', 'Call the technician', 'Change the sensor'], a: 0 },
+  { lvl: 'B2', q: 'The line ___ stopped if the operator had seen the alarm.', o: ["wouldn't have", "won't have", "didn't"], a: 0 },
+  { lvl: 'B2', q: 'Can we ___ the meeting to next Tuesday? (postpone)', o: ['push back', 'push over', 'push through'], a: 0 },
+  { lvl: 'B2', audio: "We could tighten the wane allowance, but bear in mind you'd lose some recovery.", q: 'What is the drawback?', es: '¿Cuál es la desventaja?', o: ['Losing some recovery', 'Getting more wane', 'Slower saws'], a: 0 },
+  { lvl: 'C1', q: '___ the delays, the project was delivered on budget.', o: ['Despite', 'Although', 'However'], a: 0 },
+  { lvl: 'C1', q: '"The supplier is dragging its feet" means…', o: ['It is being slow on purpose', 'It is walking around the mill', 'It is working very fast'], a: 0 },
+  { lvl: 'C1', audio: "Frankly, unless the whole chain keeps up, the upgrade won't pay off, however fast the new machines are.", q: "What is the speaker's main point?", es: '¿Cuál es la idea principal?', o: ['The whole production chain must improve too', 'The new machines are too slow', 'The upgrade is cheap'], a: 0 }
+];
+const LEVEL_DESC = {
+  A1: 'Principiante: entiendes palabras y frases muy simples. Empezaremos con lo básico del trabajo diario.',
+  A2: 'Básico: te defiendes con frases cortas y temas conocidos. Ideal para practicar situaciones concretas de la planta.',
+  B1: 'Intermedio: puedes explicar problemas simples y entender a los técnicos si hablan claro.',
+  B2: 'Intermedio alto: puedes discutir temas técnicos con bastante fluidez. Ahora toca sonar más natural.',
+  C1: 'Avanzado: manejas reuniones y negociaciones. Trabajaremos matices, expresiones y rapidez.'
+};

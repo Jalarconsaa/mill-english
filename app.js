@@ -91,7 +91,7 @@ function show(view) {
   $$('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   $('#main').scrollTop = 0;
   if (view === 'home') updateHome();
-  if (view === 'notes') { renderNotes(); if (D.notes.length && !todayStats().notes) bump('notes'); }
+  if (view === 'notes') applyReviewMode($('#notesPanel').hidden ? 'cards' : 'notes');
   if (view === 'dict' && !dict.items.length) loadDict(dict.cat);
   if (view === 'spell' && !spell.target) newSpell();
   if (view === 'listen') renderListenList();
@@ -283,7 +283,8 @@ function updateHome() {
   $('#r-talk').classList.toggle('done', st.talk >= 4);
   $('#r-listen').classList.toggle('done', st.listen >= 1);
   const u = me(); $('#btnUser').textContent = initials(u.name); $('#btnUser').style.setProperty('--uc', USER_COLORS[u.color] || USER_COLORS[0]);
-  $('#r-notes').classList.toggle('done', st.notes >= 1);
+  $('#r-notes').classList.toggle('done', (st.cards || 0) >= 10 || !!st.reviewDone);
+  $('#testNotice').hidden = !!me().tested;
   const days = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
   let html = '';
   for (let i = 6; i >= 0; i--) {
@@ -352,7 +353,7 @@ function talkSystem() {
   return `You are ${p.en}
 You are visiting a sawmill in Chile.
 MILL CONTEXT: ${MILL_CONTEXT}
-You are talking with a Chilean sawmill worker who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
+You are talking with ${me().name !== 'Yo' ? me().name + ', ' : ''}a Chilean sawmill worker at Rumasal${me().role ? ' (job: ' + me().role + ')' : ''} who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
 SCENARIO: ${sc.en}
 
 RULES FOR YOUR REPLY:
@@ -1019,7 +1020,7 @@ $('#listenAI').onclick = async () => {
   try {
     const r = await gemini(
       `You write realistic listening-practice dialogues for Chilean sawmill workers learning English. ${MILL_CONTEXT}
-Available speakers (use exactly these role ids): "mattias" (Swedish USNR technician), "joel" (Swedish USNR scanner specialist), "alvaro" (Canadian USNR technician), "paul" (Swedish USNR project manager), "local" (a Chilean worker, supervisor or manager: invent a Chilean first name).`,
+Available speakers (use exactly these role ids): "mattias" (Swedish USNR technician), "joel" (Swedish USNR scanner specialist), "alvaro" (Canadian USNR technician), "paul" (Swedish USNR project manager), "local" (a real Rumasal person from the list above, chosen to fit the topic). You may also use the USNR technicians Krim, Lenan, Andrew or Jonathan: in that case use role "mattias" or "alvaro" for their voice.`,
       [{ role: 'user', parts: [{ text: `Write one dialogue between two speakers about: ${$('#listenAITopic').value}. CEFR level ${S.level}. 8 to 10 lines, natural spoken English as it would really happen at the mill. Then write 3 multiple-choice comprehension questions with 3 options each.
 Respond ONLY with JSON:
 {"title_es":"short title in Spanish","context_es":"one sentence in Spanish describing the situation","speakers":{"A":{"name":"...","role":"mattias|joel|alvaro|paul|local"},"B":{"name":"...","role":"..."}},"lines":[{"s":"A","en":"...","es":"Spanish (Chile) translation"}],"questions":[{"q":"question in English","es":"question in Spanish","options":["...","...","..."],"answer":0}]}` }] }], 0.9);
@@ -1122,7 +1123,7 @@ function syncPayload() {
   const u = me(), st = todayStats(), total = Object.values(D.stats).reduce((a, x) => a + (x.secs || 0), 0);
   return { user_id: u.id, name: u.name, role: u.role || '', level: S.level, date: dayKey(),
     minutes: Math.round(st.secs / 60), dict: st.dict, spell: st.spell, talk: st.talk, listen: st.listen || 0,
-    notes: D.notes.length, streak: streak(), totalMinutes: Math.round(total / 60) };
+    notes: D.notes.length, cards: st.cards || 0, streak: streak(), totalMinutes: Math.round(total / 60) };
 }
 function syncNow(beacon = false) {
   if (!S.teamUrl || me().name === 'Yo') return false;
@@ -1180,6 +1181,178 @@ $('#btnTeamPanel').onclick = async () => {
     box.innerHTML = '<p class="muted">No se pudo leer el panel desde la app. Puedes ver el avance directamente en la planilla de Google Sheets.</p>';
   }
 };
+
+/* ============ Repaso con tarjetas (repetición espaciada) ============ */
+const INTERVALS = [0, 1, 3, 7, 14, 30, 60];   // días según la "caja" de la tarjeta
+const NEW_PER_DAY = 10;
+function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return dayKey(d); }
+function srs() {
+  if (!D.srs) D.srs = { cards: {}, custom: [], newDay: '', newCount: 0, extra: 0 };
+  if (D.srs.newDay !== dayKey()) { D.srs.newDay = dayKey(); D.srs.newCount = 0; D.srs.extra = 0; }
+  return D.srs;
+}
+function cardSource(key) {
+  if (key.startsWith('w:')) { const w = WORDS.find(x => x[0] === key.slice(2)); return w && { kind: 'Vocabulario del aserradero', front: w[1], back: w[0], say: w[0] }; }
+  if (key.startsWith('n:')) { const n = D.notes.find(x => x.key === key.slice(2)); return n && { kind: 'Tus errores', front: `Corrige: «${n.original}»`, back: n.corrected, sub: n.sentence || n.explanation, say: n.sentence || n.corrected }; }
+  if (key.startsWith('c:')) { const c = srs().custom.find(x => 'c:' + x.en === key); return c && { kind: 'Guardada del tutor', front: c.es, back: c.en, say: c.en }; }
+  return null;
+}
+let rq = [], rcur = null;
+function buildReviewQueue() {
+  const st = srs(), today = dayKey();
+  const due = Object.entries(st.cards).filter(([k, c]) => c.due <= today && cardSource(k)).map(([k]) => k);
+  const allowNew = Math.max(0, NEW_PER_DAY + st.extra - st.newCount);
+  const candidates = [
+    ...D.notes.slice().sort((a, b) => b.count - a.count).map(n => 'n:' + n.key),
+    ...st.custom.map(c => 'c:' + c.en),
+    ...WORDS.map(w => 'w:' + w[0])
+  ].filter(k => !st.cards[k]);
+  rq = shuffle(due).concat(candidates.slice(0, allowNew));
+}
+function showCard() {
+  const st = srs();
+  rcur = rq.shift() || null;
+  const dueLeft = rq.length + (rcur ? 1 : 0);
+  const known = Object.values(st.cards).filter(c => c.box >= 3).length;
+  $('#cardsCount').textContent = rcur ? `Quedan ${dueLeft} hoy` : '';
+  $('#cardsStats').textContent = `${Object.keys(st.cards).length} tarjetas · ${known} bien aprendidas`;
+  $('#fcBack').hidden = true; $('#fcGrade').hidden = true;
+  if (!rcur) {
+    const tomorrow = Object.values(st.cards).filter(c => c.due === addDays(1)).length;
+    $('#fcKind').textContent = '';
+    $('#fcFront').innerHTML = `¡Listo por hoy! 🎉<small class="muted" style="display:block;font-size:15px;font-weight:400;margin-top:8px">Mañana te esperan ${tomorrow} tarjetas.</small>`;
+    $('#fcShow').textContent = 'Estudiar 10 tarjetas más';
+    const t = todayStats(); if (!t.reviewDone) { t.reviewDone = 1; persist(); updateHome(); }
+    return;
+  }
+  const c = cardSource(rcur);
+  $('#fcKind').textContent = c.kind + (st.cards[rcur] ? '' : ' · nueva');
+  $('#fcFront').textContent = c.front;
+  $('#fcBack').innerHTML = `${esc(c.back)}${c.sub ? `<small>${esc(c.sub)}</small>` : ''}<div><button class="btn ghost small" id="fcSay">🔊 Escuchar</button></div>`;
+  $('#fcShow').textContent = 'Mostrar respuesta';
+  $('#fcShow').hidden = false;
+}
+$('#fcShow').onclick = () => {
+  if (!rcur) { srs().extra += 10; persist(); buildReviewQueue(); showCard(); return; }
+  $('#fcBack').hidden = false; $('#fcGrade').hidden = false; $('#fcShow').hidden = true;
+  const c = cardSource(rcur); $('#fcSay').onclick = () => speak(c.say, S.rate, 'narrator'); speak(c.back, S.rate, 'narrator');
+};
+$$('#fcGrade button').forEach(b => b.onclick = () => {
+  const g = +b.dataset.g, st = srs();
+  let card = st.cards[rcur];
+  if (!card) { card = st.cards[rcur] = { box: 0, due: dayKey() }; st.newCount++; }
+  if (g === 0) { card.box = 1; card.due = dayKey(); rq.splice(Math.min(3, rq.length), 0, rcur); }
+  else { card.box = Math.min(card.box + (g === 2 ? 2 : 1), INTERVALS.length - 1); card.due = addDays(INTERVALS[card.box]); }
+  todayStats().cards = (todayStats().cards || 0) + 1;
+  persist(); updateHome(); showCard();
+});
+function applyReviewMode(mode) {
+  $$('#reviewModes button').forEach(b => b.classList.toggle('on', b.dataset.rv === mode));
+  $('#cardsPanel').hidden = mode !== 'cards'; $('#notesPanel').hidden = mode !== 'notes';
+  if (mode === 'cards') { buildReviewQueue(); showCard(); }
+  else { renderNotes(); if (D.notes.length && !todayStats().notes) bump('notes'); }
+}
+$$('#reviewModes button').forEach(b => b.onclick = () => applyReviewMode(b.dataset.rv));
+
+/* ============ Tutor de dudas ============ */
+let tutorHistory = [];
+function tutorSystem() {
+  const u = me();
+  return `You are a friendly, patient English tutor for workers at a sawmill in Chile. ${MILL_CONTEXT}
+The student is ${u.name !== 'Yo' ? u.name : 'a worker'}${u.role ? ', ' + u.role : ''}, CEFR level ${S.level}. They ask questions in Spanish about English: grammar, vocabulary, how to say something at work, pronunciation, or phrases they heard from USNR technicians.
+Answer in simple Chilean Spanish, clear and short (maximum about 120 words). Give 2 or 3 English examples related to the sawmill when useful. If they ask how to say something, give the most natural option first, and a more formal one if relevant. For pronunciation, explain with Spanish-friendly approximations.
+Respond ONLY with JSON: {"answer_es":"...","examples":[{"en":"...","es":"..."}]}`;
+}
+function tutorAdd(html, cls) {
+  const div = document.createElement('div'); div.className = cls; div.innerHTML = html;
+  $('#tutorChat').appendChild(div); requestAnimationFrame(() => div.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+  return div;
+}
+async function tutorAsk(q) {
+  q = (q || '').trim(); if (!q) return;
+  if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini en Ajustes.'); show('settings'); return; }
+  $('#tutorInput').value = '';
+  tutorAdd(esc(q), 'msg me');
+  tutorHistory.push({ role: 'user', parts: [{ text: q }] });
+  if (tutorHistory.length > 12) { tutorHistory = tutorHistory.slice(-10); while (tutorHistory[0].role !== 'user') tutorHistory.shift(); }
+  const typing = tutorAdd('Pensando…', 'msg ai typing');
+  try {
+    const r = await gemini(tutorSystem(), tutorHistory, 0.6);
+    typing.remove();
+    const div = tutorAdd(`<div class="who">Tutor</div><div class="tutor-answer">${esc(r.answer_es || '')}</div>` +
+      (r.examples || []).map((ex, i) => `<div class="tutor-ex"><div>${esc(ex.en)}</div><div class="es">${esc(ex.es)}</div>
+        <button data-say="${i}">🔊 Escuchar</button> <button data-save="${i}">🃏 Guardar en tarjetas</button></div>`).join(''), 'msg ai');
+    div.querySelectorAll('[data-say]').forEach(b => b.onclick = () => speak(r.examples[+b.dataset.say].en, S.rate, 'narrator'));
+    div.querySelectorAll('[data-save]').forEach(b => b.onclick = () => {
+      const ex = r.examples[+b.dataset.save], st = srs();
+      if (!st.custom.some(c => c.en === ex.en)) { st.custom.push({ en: ex.en, es: ex.es }); persist(); }
+      b.textContent = '✓ Guardada'; b.disabled = true;
+    });
+    tutorHistory.push({ role: 'model', parts: [{ text: r.answer_es || '' }] });
+    activity();
+  } catch (e) { typing.remove(); tutorHistory.pop(); tutorAdd(esc(aiErrorMsg(e)), 'feedback has-errors'); $('#tutorInput').value = q; }
+}
+$('#tutorSend').onclick = () => tutorAsk($('#tutorInput').value);
+$('#tutorInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tutorAsk($('#tutorInput').value); } });
+$$('#tutorChips .chip').forEach(b => b.onclick = () => tutorAsk(b.dataset.q));
+$('#tutorMic').onclick = () => {
+  if (!SR) { toast('Tu navegador no reconoce voz.'); return; }
+  // La pregunta al tutor se dicta en español
+  const rec = new SR(); rec.lang = 'es-CL'; rec.interimResults = true;
+  $('#tutorMic').classList.add('listening');
+  rec.onresult = e => { $('#tutorInput').value = Array.from(e.results).map(r => r[0].transcript).join(' '); };
+  rec.onend = () => $('#tutorMic').classList.remove('listening');
+  rec.start();
+};
+$('#btnTutor').onclick = () => show(currentView === 'tutor' ? 'home' : 'tutor');
+
+/* ============ Test de nivel ============ */
+const test = { i: 0, answers: [], order: [] };
+function startTest() {
+  test.i = 0; test.answers = [];
+  $('#testIntro').hidden = true; $('#testResult').hidden = true; $('#testBody').hidden = false;
+  showTestQ();
+}
+function showTestQ() {
+  const q = TEST_QUESTIONS[test.i];
+  $('#testCount').textContent = `Pregunta ${test.i + 1} de ${TEST_QUESTIONS.length}`;
+  $('#testLevelTag').textContent = q.audio ? '🔊 Listening' : '';
+  $('#testMeter').style.width = (test.i / TEST_QUESTIONS.length * 100) + '%';
+  const opts = shuffle(q.o.map((o, i) => [o, i])).concat([['No sé', -1]]);
+  $('#testQ').innerHTML = `${q.audio ? '<button class="play" id="testPlay">▶ Escuchar audio</button>' : ''}
+    <strong>${esc(q.q)}</strong>${q.es ? `<div class="qes">${esc(q.es)}</div>` : ''}
+    ${opts.map(([o, i]) => `<button data-i="${i}">${esc(o)}</button>`).join('')}`;
+  if (q.audio) { $('#testPlay').onclick = () => speak(q.audio, 0.95, 'mattias'); setTimeout(() => speak(q.audio, 0.95, 'mattias'), 300); }
+  $$('#testQ button[data-i]').forEach(b => b.onclick = () => {
+    test.answers.push({ lvl: q.lvl, ok: +b.dataset.i === q.a });
+    test.i++;
+    if (test.i < TEST_QUESTIONS.length) showTestQ(); else finishTest();
+  });
+}
+function finishTest() {
+  speechSynthesis.cancel();
+  const lv = ['A1', 'A2', 'B1', 'B2', 'C1'];
+  const score = {}; lv.forEach(l => score[l] = test.answers.filter(a => a.lvl === l && a.ok).length);
+  // Se aprueba un nivel con 2 de 3; el resultado es el último nivel aprobado de corrido (mínimo A1)
+  let result = 'A1';
+  for (const l of lv) { if (score[l] >= 2) result = l; else break; }
+  $('#testBody').hidden = true; $('#testResult').hidden = false;
+  $('#testResult').innerHTML = `<div class="card-plain" style="text-align:center">
+    <p class="muted">Tu nivel estimado</p><div class="lvl-big">${result}</div>
+    <p>${esc(LEVEL_DESC[result])}</p>
+    <p class="muted small">${lv.map(l => `${l}: ${score[l]}/3`).join(' · ')}</p>
+    <button class="btn primary wide" id="testApply">Usar nivel ${result}</button>
+    <button class="btn ghost wide" id="testAgain">Repetir test</button></div>`;
+  $('#testApply').onclick = () => {
+    S.level = result; me().level = result; me().tested = dayKey(); persist(); initSettings(); updateHome();
+    toast(`Nivel ${result} aplicado. ¡A practicar!`); show('home');
+  };
+  $('#testAgain').onclick = startTest;
+}
+$('#testStart').onclick = startTest;
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-go-test]')) { $('#testIntro').hidden = false; $('#testBody').hidden = true; $('#testResult').hidden = true; show('test'); }
+});
 
 /* ============ Inicio de la app ============ */
 initSettings();
