@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1D2B24">
-<title>Mill English</title>
+<title>My English Practice</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -15,7 +15,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="stamp">Mill English</span></div>
+  <div class="brand"><span class="stamp">My English</span></div>
   <div class="today-chip" id="todayChip">0 / 20 min</div>
   <button class="icon-btn tutor-btn" id="btnTutor" aria-label="Tutor de dudas">💬</button>
   <button class="avatar" id="btnUser" aria-label="Usuarios">?</button>
@@ -34,6 +34,9 @@
       <div class="meter-labels"><span id="minsToday">0 min</span><span id="streak">Racha: 0 días</span></div>
     </div>
 
+    <h2 class="section-title">Tema de práctica</h2>
+    <div class="topic-pick" id="topicPick"></div>
+
     <div class="notice test-notice" id="testNotice" hidden>
       <p><strong>¿Cuál es tu nivel de inglés?</strong> Haz el test de 15 preguntas (unos 8 minutos) y la app se ajustará a ti.</p>
       <button class="btn primary" data-go-test>Hacer test de nivel</button>
@@ -44,7 +47,7 @@
       <li data-go="dict" id="r-dict"><span class="tick"></span><div><strong>Dictado</strong><span>5–10 min · escucha y escribe frases del trabajo</span></div></li>
       <li data-go="spell" id="r-spell"><span class="tick"></span><div><strong>Deletreo</strong><span>3–5 min · palabras, códigos y alfabeto fonético</span></div></li>
       <li data-go="listen" id="r-listen"><span class="tick"></span><div><strong>Listening</strong><span>5 min · escucha una conversación y responde</span></div></li>
-      <li data-go="talk" id="r-talk"><span class="tick"></span><div><strong>Conversación</strong><span>5–15 min · habla con un técnico virtual</span></div></li>
+      <li data-go="talk" id="r-talk"><span class="tick"></span><div><strong>Conversación</strong><span>5–15 min · habla con un personaje virtual</span></div></li>
       <li data-go="notes" id="r-notes"><span class="tick"></span><div><strong>Repaso con tarjetas</strong><span>3 min · vocabulario y tus errores, justo antes de olvidarlos</span></div></li>
     </ol>
 
@@ -63,15 +66,11 @@
       <label>Escenario
         <select id="scenario"></select>
       </label>
-      <label>Técnico</label>
+      <textarea id="customScenario" rows="2" maxlength="300" placeholder="Describe la situación que quieres practicar, ej: explicarle a un técnico que la máquina hace un ruido raro" hidden></textarea>
+      <label>Personaje</label>
       <div class="persona-pick" id="personaPick"></div>
       <label hidden>Técnico
-        <select id="persona">
-          <option value="mattias">Mattias · técnico sueco</option>
-          <option value="joel">Joel · técnico sueco</option>
-          <option value="alvaro">Álvaro · técnico de Canadá (habla español)</option>
-          <option value="paul">Paul · jefe de proyecto sueco</option>
-        </select>
+        <select id="persona"></select>
       </label>
       <button class="btn primary wide" id="btnStartTalk">Empezar conversación</button>
     </div>
@@ -92,22 +91,20 @@
   <!-- LISTENING -->
   <section class="view" id="view-listen">
     <div id="listenBrowse">
+      <div class="card-plain art-box">
+        <strong>📄 Mis artículos</strong>
+        <p class="muted small">Sube un artículo en PDF que te interese y crea con él listening, conversaciones y tarjetas de vocabulario.</p>
+        <label class="btn primary wide file-btn" id="pdfBtn">Subir PDF<input type="file" id="pdfInput" accept="application/pdf" hidden></label>
+        <div id="articleList"></div>
+      </div>
       <div class="chips" id="listenTopics"></div>
       <div id="listenList"></div>
       <div class="card-plain ai-box">
         <strong>Crear conversación nueva con IA</strong>
         <label>Tema
-          <select id="listenAITopic">
-            <option value="the new USNR edger with the BioLuma scanner">Canteadora nueva y scanner BioLuma</option>
-            <option value="the sawmill upgrade: removing the return line, double infeed, two primary machines, two chipper canters">Upgrade del aserradero</option>
-            <option value="increasing production from 28,000 to 45,000 cubic meters, bottlenecks and planning">Aumento de producción a 45.000 m³</option>
-            <option value="troubleshooting a machine breakdown with a USNR technician">Falla de una máquina</option>
-            <option value="safety during installation and maintenance">Seguridad</option>
-            <option value="log yard, debarker, trimmer, sorter bins, stacker, strapping, anti-sapstain dip and end painting">Equipos de la planta</option>
-            <option value="a supervisors and managers meeting with the machinery supplier">Supervisión y jefatura</option>
-            <option value="casual conversation with visiting technicians">Conversación casual</option>
-          </select>
+          <select id="listenAITopic"></select>
         </label>
+        <input id="listenAICustom" type="text" maxlength="200" placeholder="Escribe tu tema, ej: rescate en altura con cuerdas" hidden>
         <button class="btn primary wide" id="listenAI">Generar conversación</button>
       </div>
     </div>
@@ -172,7 +169,7 @@
       <button data-answer="voice">🎙 Responder hablando</button>
     </div>
     <div class="chips" id="dictCats"></div>
-    <div class="card-plain">
+    <div class="card-plain" id="dictCard">
       <div class="progress-line"><span id="dictCount">1 / 8</span><span id="dictScore"></span></div>
       <div class="play-row">
         <button class="play" id="dictPlay">▶ Escuchar</button>
@@ -186,8 +183,11 @@
         <button class="btn primary" id="dictCheck">Revisar</button>
         <button class="btn ghost" id="dictNext">Siguiente</button>
       </div>
+      <button class="btn ghost small" id="dictEsBtn">👁 Ver en español</button>
+      <div class="es dict-es" id="dictEs" hidden></div>
       <div class="result" id="dictResult"></div>
     </div>
+    <div class="card-plain" id="dictSummary" hidden></div>
     <button class="btn wide" id="dictAI">Generar frases nuevas con IA</button>
   </section>
 
@@ -354,20 +354,9 @@
 
     <h2 class="section-title">Voces</h2>
     <div class="card-plain">
-      <p class="muted small">Elige una voz para cada técnico y pruébala con ▶. Las voces marcadas con ♂ parecen masculinas.</p>
-      <label>Mattias (técnico sueco)
-        <div class="composer-row"><select class="voice-sel" data-role="mattias"></select><button class="btn ghost small" data-test="mattias">▶</button></div>
-      </label>
-      <label>Joel (técnico sueco)
-        <div class="composer-row"><select class="voice-sel" data-role="joel"></select><button class="btn ghost small" data-test="joel">▶</button></div>
-      </label>
-      <label>Álvaro (técnico de Canadá)
-        <div class="composer-row"><select class="voice-sel" data-role="alvaro"></select><button class="btn ghost small" data-test="alvaro">▶</button></div>
-      </label>
-      <label>Paul (jefe de proyecto sueco)
-        <div class="composer-row"><select class="voice-sel" data-role="paul"></select><button class="btn ghost small" data-test="paul">▶</button></div>
-      </label>
-      <label>Compañeros chilenos (en el listening)
+      <p class="muted small">Elige una voz para cada personaje y pruébala con ▶. Las voces marcadas con ♂ parecen masculinas.</p>
+      <div id="voiceSlots"></div>
+      <label>Personas chilenas (en el listening)
         <div class="composer-row"><select class="voice-sel" data-role="local"></select><button class="btn ghost small" data-test="local">▶</button></div>
       </label>
       <label>Dictado y deletreo
@@ -420,6 +409,7 @@
 <script src="data.js"></script>
 <script src="listening.js"></script>
 <script src="avatars.js"></script>
+<script src="topics.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

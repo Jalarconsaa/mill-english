@@ -1,4 +1,4 @@
-# Mill English: cómo instalarla en tu Android (gratis)
+# My English Practice: cómo instalarla en tu Android (gratis)
 
 La app necesita estar publicada en internet con HTTPS para que funcionen el micrófono y la instalación. Lo haremos gratis con GitHub Pages, todo desde el celular.
 
@@ -33,3 +33,12 @@ El dictado y el deletreo funcionan sin clave y sin internet (el reconocimiento d
 
 ## Usuarios y seguimiento del equipo
 Toca el círculo con tus iniciales (arriba) para ponerle tu nombre a tu usuario, crear usuarios para compañeros o cambiar de usuario. Para ver el avance de todo el equipo desde sus propios teléfonos, sigue las instrucciones del archivo EQUIPO.md.
+
+## Temas de práctica
+En Inicio eliges el tema: Aserradero, Bomberos y emergencias o Fitness. Cada tema tiene sus propios personajes, conversaciones, dictados, vocabulario y listening. Tu progreso, errores y tarjetas se mantienen al cambiar de tema.
+
+## Artículos en PDF
+En Listening → "Mis artículos" puedes subir un PDF (idealmente de pocas páginas). La IA lo resume y extrae vocabulario; con él puedes crear conversaciones para escuchar, conversar con un personaje sobre el artículo o guardar el vocabulario en tus tarjetas. El PDF no se guarda en el teléfono, solo su resumen.
+
+## Si el ícono o el nombre no cambian
+Android actualiza el ícono de las apps instaladas por su cuenta y puede tardar hasta un día. Si quieres verlo de inmediato, desinstala el ícono antiguo y vuelve a instalar desde Chrome (tu progreso se mantiene).

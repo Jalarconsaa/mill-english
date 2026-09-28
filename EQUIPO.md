@@ -1,9 +1,9 @@
 # Seguimiento del equipo con Google Sheets (gratis)
 
-Con esto cada compañero usa Mill English en su propio teléfono y tú ves el avance de todos en una planilla y en el panel de la app. Es más fácil hacerlo desde un computador (una sola vez, unos 10 minutos).
+Con esto cada compañero usa My English Practice en su propio teléfono y tú ves el avance de todos en una planilla y en el panel de la app. Es más fácil hacerlo desde un computador (una sola vez, unos 10 minutos).
 
 ## 1. Crear la planilla
-1. Entra a https://sheets.google.com y crea una planilla en blanco. Nómbrala "Mill English – Equipo".
+1. Entra a https://sheets.google.com y crea una planilla en blanco. Nómbrala "My English Practice – Equipo".
 2. Menú **Extensiones → Apps Script**.
 3. Borra lo que aparece y pega todo el contenido del archivo `equipo-apps-script.gs`. Guarda (ícono de disquete).
 
@@ -15,7 +15,7 @@ Con esto cada compañero usa Mill English en su propio teléfono y tú ves el av
 5. Copia la **URL de la aplicación web** (termina en `/exec`).
 
 ## 3. Conectar la app
-1. En Mill English toca tu círculo de usuario (arriba) → "Seguimiento del equipo".
+1. En My English Practice toca tu círculo de usuario (arriba) → "Seguimiento del equipo".
 2. Pega la URL y toca "Sincronizar ahora".
 3. Toca **"Invitar compañero"** y envía el enlace por WhatsApp. Al abrirlo, la app de tu compañero queda conectada y le pide crear su usuario.
 

@@ -6,9 +6,9 @@ REAL PEOPLE AT RUMASAL (use these names when you mention coworkers): Mauro (plan
 USNR PEOPLE: Mattias and Joel (Swedish technicians), Álvaro (Canadian technician who also speaks Spanish), Paul (Swedish project manager), and other USNR technicians: Krim, Lenan, Andrew and Jonathan.`;
 
 // Voces: mattias y joel (suecos), alvaro (Canadá), paul (jefe de proyecto), local (chileno)
-const LISTEN_TOPICS = { edger: 'Canteadora USNR', upgrade: 'Upgrade del aserradero', ops: 'Operación y seguridad', social: 'Social' };
+const MILL_LISTEN_TOPICS = { edger: 'Canteadora USNR', upgrade: 'Upgrade del aserradero', ops: 'Operación y seguridad', social: 'Social' };
 
-const DIALOGS = [
+const MILL_DIALOGS = [
   { id: 'edger-arrival', topic: 'edger', level: 'B1', title: 'Llega la nueva canteadora',
     context: 'Álvaro, técnico de USNR, coordina con Rubén, jefe de aserradero, la llegada de la canteadora.',
     speakers: { A: ['Álvaro', 'alvaro'], B: ['Rubén', 'local'] },

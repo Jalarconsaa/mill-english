@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '10';
+const APP_VERSION = '11';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -95,7 +95,7 @@ function show(view) {
   if (view === 'notes') applyReviewMode($('#notesPanel').hidden ? 'cards' : 'notes');
   if (view === 'dict' && !dict.items.length) loadDict(dict.cat);
   if (view === 'spell' && !spell.target) newSpell();
-  if (view === 'listen') renderListenList();
+  if (view === 'listen') { renderListenList(); renderArticles(); }
   if (view === 'users') renderUsers();
 }
 $$('.tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
@@ -106,6 +106,14 @@ document.addEventListener('click', e => { if (e.target.closest('[data-open-setti
 $$('.routine li').forEach(li => li.addEventListener('click', () => show(li.dataset.go)));
 
 /* ============ Voz: hablar (TTS) ============ */
+// Selectores de voz según los personajes del tema activo
+(() => {
+  const box = document.getElementById('voiceSlots'); if (!box) return;
+  box.innerHTML = Object.entries(PERSONAS).map(([k, p]) => `<label>${esc(p.name)} (${esc(p.es.split(', ').slice(1).join(', '))})
+    <div class="composer-row"><select class="voice-sel" data-role="${p.voice || k}"></select><button class="btn ghost small" data-test="${k}">▶</button></div></label>`).join('');
+})();
+// Los personajes usan una de las 4 voces configurables
+const voiceSlot = role => (PERSONAS[role] && PERSONAS[role].voice) || role;
 let voices = [];
 // Heurística para detectar voces masculinas (los nombres varían según el teléfono)
 const MALE_RX = /(^|[^a-z])(male|man|guy)([^a-z]|$)|daniel|david|mark|george|james|fred|alex|thomas|oliver|arthur|aaron|ryan|guy|iol|iom|tpd|rjs|gbd|gbg|gbc|male-/i;
@@ -123,6 +131,7 @@ function autoVoice(role) {
   return voices[0];
 }
 function voiceFor(role) {
+  role = voiceSlot(role);
   const name = S.voices[role];
   return voices.find(v => v.name === name) || autoVoice(role);
 }
@@ -469,7 +478,7 @@ const talk = { history: [], active: false, busy: false, turns: [], started: 0 };
 const LEVEL_NOTES = {
   A1: 'The learner is a beginner. Use very simple, common words, very short sentences (maximum 8 words), mostly present tense. Ask simple yes/no or either/or questions.',
   A2: 'Use simple vocabulary and short sentences. Speak slowly and clearly. Avoid idioms.',
-  B1: 'Use everyday vocabulary with some technical sawmill terms and a few common phrasal verbs.',
+  B1: 'Use everyday vocabulary with some technical terms of the topic and a few common phrasal verbs.',
   B2: 'Speak naturally, with idioms and phrasal verbs common at work, like a real technician would.',
   C1: 'Speak like a native professional at normal speed: idioms, phrasal verbs, contractions, indirect and polite business language.',
   C2: 'Speak exactly like a native speaker: slang, idioms, humor, fast natural phrasing and cultural references.'
@@ -482,39 +491,58 @@ const STRICTNESS = {
   C1: 'Be demanding: correct subtle errors, unnatural collocations, wrong register and tone.',
   C2: 'Be very demanding, like a native editor: flag anything a native speaker would not say, including subtle word choice, rhythm and register.'
 };
-[...new Set(SCENARIOS.map(s => s.group))].forEach(g => {
+function renderScenarios() {
+  const prev = $('#scenario').value;
+  $('#scenario').innerHTML = '';
+  [...new Set(SCENARIOS.map(s => s.group))].forEach(g => {
   const og = document.createElement('optgroup'); og.label = g;
   SCENARIOS.filter(s => s.group === g).forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.es; og.appendChild(o); });
   $('#scenario').appendChild(og);
-});
+  });
+  const og = document.createElement('optgroup'); og.label = 'Tema libre';
+  og.innerHTML = '<option value="custom">✏️ Escribir mi propia situación…</option>'; $('#scenario').appendChild(og);
+  if (prev && [...$('#scenario').options].some(o => o.value === prev)) $('#scenario').value = prev;
+}
+renderScenarios();
+$('#persona').innerHTML = Object.entries(PERSONAS).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join('');
+// Escenario activo (incluye el tema libre)
+function currentScenario() {
+  const id = $('#scenario').value;
+  if (id === 'custom') {
+    const t = $('#customScenario').value.trim() || 'Free conversation about the topic.';
+    return { id: 'custom', group: 'Tema libre', es: 'Tema libre: ' + t.slice(0, 60), en: 'The learner chose this situation to practice (it may be written in Spanish: understand it and play it in English): ' + t };
+  }
+  return SCENARIOS.find(s => s.id === id) || SCENARIOS[0];
+}
 function renderPersonaPick() {
   const cur = $('#persona').value;
   $('#personaPick').innerHTML = Object.entries(PERSONAS).map(([k, p]) => `<button data-p="${k}" class="${k === cur ? 'on' : ''}">
     ${avatarHTML(k, p.name, 'lg')}<strong>${esc(p.name)}</strong><small>${esc(p.es.split(', ').slice(1).join(', '))}</small></button>`).join('');
   $$('#personaPick button').forEach(b => b.onclick = () => {
     $('#persona').value = b.dataset.p; renderPersonaPick();
-    const av = b.querySelector('.av'); const [line] = TEST_LINES[b.dataset.p]; speak(line, S.rate, b.dataset.p, av);
+    const av = b.querySelector('.av'); speak(PERSONAS[b.dataset.p].greet || 'Hello!', S.rate, b.dataset.p, av);
   });
 }
 // Sugerir a Paul para temas de jefatura y proyectos
 $('#scenario').addEventListener('change', () => {
-  const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
-  if ((sc.group === 'Supervisión y jefatura' || sc.id === 'upgrade' || sc.id === 'progress') ) { $('#persona').value = 'paul'; renderPersonaPick(); }
+  $('#customScenario').hidden = $('#scenario').value !== 'custom';
+  const sc = currentScenario();
+  if (PERSONAS.paul && (sc.group === 'Supervisión y jefatura' || sc.id === 'upgrade' || sc.id === 'progress')) { $('#persona').value = 'paul'; renderPersonaPick(); }
 });
 
 function talkSystem() {
-  const sc = SCENARIOS.find(s => s.id === $('#scenario').value), p = PERSONAS[$('#persona').value];
+  const sc = currentScenario(), p = PERSONAS[$('#persona').value];
   return `You are ${p.en}
-You are visiting a sawmill in Chile.
-MILL CONTEXT: ${MILL_CONTEXT}
-You are talking with ${me().name !== 'Yo' ? me().name + ', ' : ''}a Chilean sawmill worker at Rumasal${me().role ? ' (job: ' + me().role + ')' : ''} who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently with foreign technicians at work.
+${TOPIC.setting}
+CONTEXT: ${CONTEXT}
+You are talking with ${me().name !== 'Yo' ? me().name + ', ' : ''}${TOPIC.learner}${me().role ? ' (job: ' + me().role + ')' : ''} who is learning English. Their CEFR level is ${S.level}. Their goal is to communicate confidently in English about this topic.
 SCENARIO: ${sc.en}
 
 RULES FOR YOUR REPLY:
 - Stay in character. Talk like in a real conversation at the mill, never like a teacher.
 - Keep each reply short: 1 to 3 sentences. ${LEVEL_NOTES[S.level]}
 - Usually end with a question or something that invites the learner to answer.
-- Use real sawmill vocabulary when it fits (saw blades, edger, trimmer, kiln, conveyor, bearings, PLC, lockout, shift, downtime...).
+- ${TOPIC.vocabHint}
 
 RULES FOR FEEDBACK about the learner's LAST message:
 - The learner's text comes from speech recognition: ignore punctuation, capitalization and obvious transcription glitches. Focus on grammar, word choice, missing words, word order and phrases that sound unnatural.
@@ -640,7 +668,7 @@ $('#btnStartTalk').addEventListener('click', async () => {
   if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini.'); show('settings'); return; }
   talk.history = []; talk.turns = []; talk.started = Date.now(); $('#chat').innerHTML = '';
   $('#talkSetup').hidden = true; $('#composer').hidden = false;
-  const sc = SCENARIOS.find(s => s.id === $('#scenario').value);
+  const sc = currentScenario();
   const pr = $('#persona').value;
   chatAdd(`<div class="talk-hero">${avatarHTML(pr, PERSONAS[pr].name, 'lg')}<div><strong>${esc(sc.es)}</strong><br>con ${esc(PERSONAS[pr].es)}.<br><span class="muted small">Responde hablando con el micrófono 🎙 o escribiendo.</span></div></div>`, 'hints');
   const ok = await talkCall('[START]');
@@ -662,7 +690,7 @@ function showTalkSummary() {
   const errs = t.flatMap(x => x.cs).slice(0, 8);
   const color = pct >= 80 ? 'var(--ok)' : pct >= 50 ? 'var(--c-home)' : 'var(--bad)';
   const msg = pct >= 80 ? '¡Excelente conversación! Se nota el avance.' : pct >= 50 ? 'Buen trabajo. Repasa los errores y la próxima saldrá mejor.' : 'Cada conversación suma. Repasa estos errores en tus tarjetas.';
-  const sc = SCENARIOS.find(s => s.id === $('#scenario').value), pr = $('#persona').value;
+  const sc = currentScenario(), pr = $('#persona').value;
   const st = todayStats(); st.talkTurns = (st.talkTurns || 0) + t.length; st.talkOk = (st.talkOk || 0) + ok;
   D.talkSessions = (D.talkSessions || []).concat([{ date: dayKey(), scenario: sc.id, persona: pr, turns: t.length, ok, avg: +avg }]).slice(-60);
   persist();
@@ -705,7 +733,7 @@ $('#btnHint').addEventListener('click', async () => {
   const btn = $('#btnHint'); btn.disabled = true;
   try {
     const r = await gemini(
-      `You help a Chilean sawmill worker (CEFR ${S.level}) practice English conversation. Given the conversation so far, suggest 3 different short replies the learner could say next, natural and appropriate for level ${S.level}. Respond ONLY with JSON: {"suggestions":[{"en":"...","es":"Spanish translation"}]}`,
+      `You help ${TOPIC.learner} (CEFR ${S.level}) practice English conversation. Given the conversation so far, suggest 3 different short replies the learner could say next, natural and appropriate for level ${S.level}. Respond ONLY with JSON: {"suggestions":[{"en":"...","es":"Spanish translation"}]}`,
       [...talk.history, { role: 'user', parts: [{ text: '[HINT] Suggest what I could say next.' }] }], 0.9);
     const box = chatAdd('<strong>Puedes decir algo como:</strong>', 'hints');
     (r.suggestions || []).forEach(s => {
@@ -754,7 +782,7 @@ function renderOps(ops) {
 }
 
 /* ============ Dictado ============ */
-const dict = { cat: 'seguridad', items: [], idx: 0, checked: false, total: 0, aiItems: [] };
+const dict = { cat: Object.keys(PHRASES)[0], items: [], idx: 0, checked: false, total: 0, aiItems: [] };
 function renderDictCats() {
   const cats = Object.keys(PHRASES).slice();
   if (D.notes.length) cats.push('errores');
@@ -763,6 +791,7 @@ function renderDictCats() {
   $$('#dictCats .chip').forEach(b => b.onclick = () => loadDict(b.dataset.cat));
 }
 function loadDict(cat) {
+  if (!PHRASES[cat] && cat !== 'errores' && cat !== 'ia') cat = Object.keys(PHRASES)[0];
   dict.cat = cat;
   if (cat === 'errores') {
     const seen = new Set();
@@ -770,14 +799,15 @@ function loadDict(cat) {
       const en = n.sentence && n.sentence.split(' ').length <= 16 ? n.sentence : n.corrected;
       return { en, es: n.explanation };
     }).filter(it => it.en && !seen.has(it.en) && seen.add(it.en)).slice(0, 8);
-    if (!dict.items.length) { toast('Aún no tienes errores guardados.'); return loadDict('seguridad'); }
+    if (!dict.items.length) { toast('Aún no tienes errores guardados.'); return loadDict(Object.keys(PHRASES)[0]); }
   } else if (cat === 'ia') dict.items = dict.aiItems.slice();
   else {
     let pool = PHRASES[cat];
     if (S.level === 'A1') { const short = pool.filter(([en]) => en.split(' ').length <= 8); if (short.length >= 4) pool = short; }
     dict.items = shuffle(pool).slice(0, 8).map(([en, es]) => ({ en, es }));
   }
-  dict.idx = 0; dict.total = 0; renderDictCats(); showDictItem();
+  dict.idx = 0; dict.total = 0; dict.results = []; renderDictCats(); showDictItem();
+  $('#dictCard').hidden = false; $('#dictSummary').hidden = true;
 }
 function showDictItem() {
   dict.checked = false; dict.scored = false;
@@ -785,7 +815,15 @@ function showDictItem() {
   $('#dictCount').textContent = `${dict.idx + 1} / ${dict.items.length}`;
   $('#dictScore').textContent = dict.idx ? `Promedio ${Math.round(dict.total / dict.idx * 100)}%` : '';
   $('#dictNext').textContent = 'Saltar';
+  // Traducción oculta: solo se muestra si la pides
+  $('#dictEs').hidden = true; $('#dictEs').textContent = curDict() ? curDict().es || '' : '';
+  $('#dictEsBtn').textContent = '👁 Ver en español';
 }
+$('#dictEsBtn').onclick = () => {
+  const e = $('#dictEs'); e.hidden = !e.hidden;
+  $('#dictEsBtn').textContent = e.hidden ? '👁 Ver en español' : '🙈 Ocultar español';
+  if (!e.hidden && curDict()) curDict().usedEs = true;
+};
 const curDict = () => dict.items[dict.idx];
 $('#dictPlay').onclick = () => curDict() && speak(curDict().en);
 $('#dictSlow').onclick = () => curDict() && speak(curDict().en, 0.65);
@@ -796,13 +834,16 @@ function checkDict() {
   const typed = $('#dictInput').value.trim();
   if (!typed) { toast(voice ? 'Escucha la frase, toca 🎙 y repítela.' : 'Escucha y escribe la frase primero.'); return; }
   const it = curDict(), { ops, score } = diffWords(it.en, typed);
-  dict.checked = true; if (!dict.scored) { dict.scored = true; dict.total += score; bump('dict'); }
+  dict.checked = true;
+  if (!dict.scored) {
+    dict.scored = true; dict.total += score; bump('dict');
+    dict.results.push({ en: it.en, es: it.es, score, usedEs: !!it.usedEs, wrong: ops.filter(o => o.t === 'sub' || o.t === 'miss').map(o => o.a) });
+  }
   const pct = Math.round(score * 100);
   const label = pct === 100 ? (voice ? '¡Se te entendió todo!' : 'Perfecto') : voice ? `Se entendió el ${pct}%` : pct + '% correcto';
   $('#dictResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 70 ? 'var(--hivis)' : 'var(--bad)'}">${label}</div>
     <div class="line">${renderOps(ops)}</div>
     ${voice ? `<div class="heard">El teléfono escuchó: "${esc(typed)}"</div>` : ''}
-    <div class="es">${esc(it.es)}</div>
     ${voice && pct < 100 ? '<p class="muted small">Las palabras marcadas no se entendieron: escúchalas de nuevo en lento y repite.</p>' : ''}`;
   ops.filter(o => o.t === 'sub' && o.b.length > 1).forEach(o =>
     addNote(voice
@@ -811,16 +852,41 @@ function checkDict() {
   $('#dictNext').textContent = dict.idx + 1 < dict.items.length ? 'Siguiente' : 'Terminar';
 }
 function nextDict() {
-  if (dict.idx + 1 >= dict.items.length) {
-    const avg = Math.round(dict.total / dict.items.length * 100);
-    $('#dictResult').innerHTML = `<div class="verdict">Ronda terminada: ${avg}% promedio</div><p class="muted">Elige otra categoría o toca Siguiente para repetir con frases mezcladas.</p>`;
-    dict.idx = dict.items.length; dict.checked = false;
-    $('#dictNext').onclick = () => { $('#dictNext').onclick = nextDict; loadDict(dict.cat); };
-    return;
-  }
+  if (dict.idx + 1 >= dict.items.length) { showDictSummary(); return; }
   dict.idx++; showDictItem(); speak(curDict().en);
 }
 $('#dictCheck').onclick = checkDict;
+// Resultado final de la ronda de dictado
+function showDictSummary() {
+  speechSynthesis.cancel();
+  const r = dict.results || [], n = r.length;
+  if (!n) { loadDict(dict.cat); return; }
+  const avg = Math.round(r.reduce((a, x) => a + x.score, 0) / n * 100);
+  const perfect = r.filter(x => x.score === 1).length, withEs = r.filter(x => x.usedEs).length;
+  const words = [...new Set(r.flatMap(x => x.wrong))].slice(0, 14);
+  const color = avg >= 85 ? 'var(--ok)' : avg >= 60 ? 'var(--c-home)' : 'var(--bad)';
+  const msg = avg >= 85 ? '¡Excelente oído!' : avg >= 60 ? 'Vas bien. Repite las frases difíciles en lento.' : 'Sigue practicando: repite esta ronda en modo lento.';
+  const failed = r.filter(x => x.score < 1);
+  $('#dictCard').hidden = true; $('#dictSummary').hidden = false;
+  $('#dictSummary').innerHTML = `<div class="summary">
+    <div class="sum-head"><div><strong>Resultado del dictado</strong><br><span class="muted small">${esc(dict.cat === 'ia' ? 'Frases nuevas (IA)' : CATEGORY_NAMES[dict.cat] || '')} · ${S.dictAnswer === 'voice' ? 'respondiendo con voz' : 'escribiendo'}</span></div></div>
+    <div class="sum-ring" style="--p:${avg};--rc:${color}"><div><b>${avg}%</b><small>de palabras</small></div></div>
+    <p class="sum-msg">${msg}</p>
+    <div class="sum-stats">
+      <div><b>${perfect} de ${n}</b><small>frases perfectas</small></div>
+      <div><b>${words.length}</b><small>palabras falladas</small></div>
+      <div><b>${withEs}</b><small>con ayuda en español</small></div>
+    </div>
+    ${words.length ? `<div class="sum-errs"><strong>Palabras para repasar</strong><p>${words.map(w => `<span class="chip-word">${esc(w)}</span>`).join(' ')}</p></div>` : ''}
+    ${failed.length ? `<div class="sum-errs"><strong>Frases con errores</strong>${failed.map(x => `<div class="fix"><span class="to">${esc(x.en)}</span><span class="why">${esc(x.es || '')} · ${Math.round(x.score * 100)}%</span></div>`).join('')}</div>` : ''}
+    <div class="row-btns">
+      ${failed.length ? '<button class="btn" id="dictRetry">Repetir las difíciles</button>' : ''}
+      <button class="btn primary" id="dictAgain">Nueva ronda</button>
+    </div></div>`;
+  const rt = $('#dictRetry');
+  if (rt) rt.onclick = () => { dict.items = failed.map(x => ({ en: x.en, es: x.es })); dict.idx = 0; dict.total = 0; dict.results = []; $('#dictCard').hidden = false; $('#dictSummary').hidden = true; showDictItem(); speak(curDict().en); };
+  $('#dictAgain').onclick = () => loadDict(dict.cat);
+}
 function applyDictMode() {
   const voice = S.dictAnswer === 'voice';
   $$('#dictModes button').forEach(b => b.classList.toggle('on', b.dataset.answer === S.dictAnswer));
@@ -843,11 +909,11 @@ $('#dictAI').onclick = async () => {
     trimmer: 'trimmer and optimizer', buzones: 'sorter bins', stacker: 'stacker and stickers', enzunchado: 'package strapping',
     antimancha: 'anti-sapstain dip treatment', pintado: 'package end painting and marking', supervision: 'supervisor and management meetings, KPIs, planning',
     canteadora: 'the new USNR edger with the BioLuma grade scanner and optimizer', proyecto: 'the sawmill upgrade project (remove return line, double infeed, two primary machines, two chipper canters, 28,000 to 45,000 cubic meters)' };
-  const topic = TOPIC_EN[dict.cat] || 'mixed sawmill topics';
+  const topic = TOPIC.categoryEn[dict.cat] || (TOPIC_ID === 'mill' && TOPIC_EN[dict.cat]) || TOPIC.nameEn;
   try {
     const r = await gemini(
-      `You create listening dictation exercises for a Chilean sawmill worker learning English (CEFR ${S.level}).`,
-      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that USNR service technicians (Swedish or Canadian) or coworkers would really say at a sawmill. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
+      `You create listening dictation exercises for ${TOPIC.learner} learning English (CEFR ${S.level}). ${CONTEXT}`,
+      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that people in this context would really say. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
     dict.aiItems = (r.items || []).filter(x => x.en);
     if (!dict.aiItems.length) throw new Error('No llegaron frases.');
     loadDict('ia'); toast('Frases nuevas listas. Toca ▶ Escuchar.');
@@ -1084,7 +1150,7 @@ function initSettings() {
   $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
   $('#silence').value = String(S.silence ?? 5);
   $('#micMode').value = S.micMode || 'record';
-  $('#appVersion').textContent = 'Mill English · versión ' + APP_VERSION;
+  $('#appVersion').textContent = 'My English Practice · versión ' + APP_VERSION;
   $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
   $('#pitch').value = S.pitch; $('#pitchVal').textContent = S.pitch;
   fillModels(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
@@ -1107,7 +1173,7 @@ const TEST_LINES = {
   local: ["Hi, I'm Carlos, the shift supervisor.", 'local'],
   narrator: ['The saw blades are ready. Please check the tension.', 'narrator']
 };
-$$('[data-test]').forEach(b => b.onclick = () => { const [line, role] = TEST_LINES[b.dataset.test]; speak(line, S.rate, role); });
+$$('[data-test]').forEach(b => b.onclick = () => { const k = b.dataset.test; const line = (PERSONAS[k] && PERSONAS[k].greet) || (TEST_LINES[k] || [])[0] || 'Hello!'; speak(line, S.rate, k); });
 $('#pitch').addEventListener('input', e => { S.pitch = +e.target.value; $('#pitchVal').textContent = S.pitch; persist(); });
 $('#rate').addEventListener('input', e => { S.rate = +e.target.value; $('#rateVal').textContent = S.rate + 'x'; persist(); });
 $('#btnModels').onclick = async () => {
@@ -1132,7 +1198,7 @@ $('#btnTestKey').onclick = async () => {
   S.apiKey = $('#apiKey').value.trim(); persist(); updateHome();
   $('#keyStatus').textContent = 'Probando…';
   try {
-    const r = await gemini('Reply only with JSON.', [{ role: 'user', parts: [{ text: 'Return {"ok":true,"msg":"a short friendly greeting for a sawmill worker"}' }] }], 0.5);
+    const r = await gemini('Reply only with JSON.', [{ role: 'user', parts: [{ text: 'Return {"ok":true,"msg":"a short friendly greeting for an English learner"}' }] }], 0.5);
     $('#keyStatus').textContent = '✓ Conexión correcta: ' + (r.msg || 'OK');
   } catch (e) { $('#keyStatus').textContent = aiErrorMsg(e); }
 };
@@ -1140,7 +1206,7 @@ $('#btnExport').onclick = () => {
   const { apiKey, ...rest } = S;
   const blob = new Blob([JSON.stringify({ settings: rest, data: D }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `mill-english-respaldo-${dayKey()}.json`; a.click();
+  a.download = `my-english-respaldo-${dayKey()}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
 $('#fileImport').addEventListener('change', async e => {
@@ -1164,7 +1230,7 @@ const SPEAKER_COLORS = ['var(--c-talk)', 'var(--c-home)', 'var(--c-dict)'];
 const lst = { topic: 'all', dlg: null, showText: false, showEs: false, answers: {} };
 function customDialogs() { try { return JSON.parse(localStorage.getItem('me_dialogs') || '[]'); } catch { return []; } }
 function saveCustomDialogs(list) { try { localStorage.setItem('me_dialogs', JSON.stringify(list.slice(0, 40))); } catch {} }
-function allDialogs() { return [...customDialogs(), ...DIALOGS]; }
+function allDialogs() { return [...customDialogs().filter(d => (d.theme || 'mill') === TOPIC_ID), ...DIALOGS]; }
 const LEVEL_ORDER = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 function renderListenList() {
   const topics = { all: 'Todas', ...LISTEN_TOPICS, ai: 'Creadas con IA' };
@@ -1266,28 +1332,104 @@ $('#lpSlow').onclick = () => playLines(0, lst.dlg.lines.length - 1, 0.7);
 $('#lpShowText').onclick = () => { lst.showText = !lst.showText; renderTranscript(); };
 $('#lpShowEs').onclick = () => { lst.showEs = !lst.showEs; renderTranscript(); };
 $('#listenBack').onclick = () => { playToken++; speechSynthesis.cancel(); $('#listenPlayer').hidden = true; $('#listenBrowse').hidden = false; renderListenList(); };
-$('#listenAI').onclick = async () => {
-  const btn = $('#listenAI'); btn.disabled = true; btn.textContent = 'Creando conversación…';
+// Genera una conversación de listening sobre cualquier tema (lista, tema escrito o artículo)
+async function generateDialog(topicText, btn, label, extra = {}) {
+  btn.disabled = true; const old = btn.textContent; btn.textContent = 'Creando conversación…';
   try {
     const r = await gemini(
-      `You write realistic listening-practice dialogues for Chilean sawmill workers learning English. ${MILL_CONTEXT}
-Available speakers (use exactly these role ids): "mattias" (Swedish USNR technician), "joel" (Swedish USNR scanner specialist), "alvaro" (Canadian USNR technician), "paul" (Swedish USNR project manager), "local" (a real Rumasal person from the list above, chosen to fit the topic). You may also use the USNR technicians Krim, Lenan, Andrew or Jonathan: in that case use role "mattias" or "alvaro" for their voice.`,
-      [{ role: 'user', parts: [{ text: `Write one dialogue between two speakers about: ${$('#listenAITopic').value}. CEFR level ${S.level}. 8 to 10 lines, natural spoken English as it would really happen at the mill. Then write 3 multiple-choice comprehension questions with 3 options each.
+      `You write realistic listening-practice dialogues for ${TOPIC.learner} learning English. ${CONTEXT}
+Available speakers (use exactly these role ids): ${Object.entries(PERSONAS).map(([k, p]) => `"${k}" (${p.en.split('.')[0]})`).join(', ')}, "local" (${TOPIC.locals}).${TOPIC_ID === 'mill' ? ' You may also use the USNR technicians Krim, Lenan, Andrew or Jonathan: in that case use role "mattias" or "alvaro" for their voice.' : ''}`,
+      [{ role: 'user', parts: [{ text: `Write one dialogue between two speakers about: ${topicText}
+(The topic may be written in Spanish: understand it and write the dialogue in English.) CEFR level ${S.level}. 8 to 10 lines, natural spoken English as it would really happen in real life. Then write 3 multiple-choice comprehension questions with 3 options each.
 Respond ONLY with JSON:
-{"title_es":"short title in Spanish","context_es":"one sentence in Spanish describing the situation","speakers":{"A":{"name":"...","role":"mattias|joel|alvaro|paul|local"},"B":{"name":"...","role":"..."}},"lines":[{"s":"A","en":"...","es":"Spanish (Chile) translation"}],"questions":[{"q":"question in English","es":"question in Spanish","options":["...","...","..."],"answer":0}]}` }] }], 0.9);
-    const ok = ['mattias', 'joel', 'alvaro', 'paul', 'local'];
+{"title_es":"short title in Spanish","context_es":"one sentence in Spanish describing the situation","speakers":{"A":{"name":"...","role":"${Object.keys(PERSONAS).join('|')}|local"},"B":{"name":"...","role":"..."}},"lines":[{"s":"A","en":"...","es":"Spanish (Chile) translation"}],"questions":[{"q":"question in English","es":"question in Spanish","options":["...","...","..."],"answer":0}]}` }] }], 0.9);
+    const ok = [...Object.keys(PERSONAS), 'local'];
     const sp = k => [r.speakers[k].name, ok.includes(r.speakers[k].role) ? r.speakers[k].role : 'local'];
-    const d = { id: 'ai-' + Date.now(), topic: 'ai', level: S.level, title: r.title_es || 'Conversación nueva', context: r.context_es || '',
+    const d = { id: 'ai-' + Date.now(), topic: 'ai', theme: TOPIC_ID, level: S.level, title: r.title_es || 'Conversación nueva', context: r.context_es || '',
       speakers: { A: sp('A'), B: sp('B') },
       lines: (r.lines || []).filter(l => l.en && r.speakers[l.s]).map(l => [l.s, l.en, l.es || '']),
-      questions: (r.questions || []).filter(q => q.options && q.options.length).map(q => ({ q: q.q, es: q.es, o: q.options, a: Math.min(+q.answer || 0, q.options.length - 1) })) };
+      questions: (r.questions || []).filter(q => q.options && q.options.length).map(q => ({ q: q.q, es: q.es, o: q.options, a: Math.min(+q.answer || 0, q.options.length - 1) })), ...extra };
     if (d.lines.length < 3) throw new Error('La conversación llegó incompleta. Intenta de nuevo.');
     saveCustomDialogs([d, ...customDialogs()]);
-    openDialog(d.id);
+    show('listen'); openDialog(d.id);
     toast('Conversación nueva lista. Toca ▶ para escucharla.');
   } catch (e) { toast(aiErrorMsg(e), 4000); }
-  finally { btn.disabled = false; btn.textContent = 'Generar conversación'; }
+  finally { btn.disabled = false; btn.textContent = label || old; }
+}
+$('#listenAITopic').innerHTML = TOPIC.aiTopics.map(([en, es]) => `<option value="${esc(en)}">${esc(es)}</option>`).join('') +
+  '<option value="__custom">✏️ Otro tema (escríbelo tú)</option>';
+$('#listenAITopic').addEventListener('change', () => { $('#listenAICustom').hidden = $('#listenAITopic').value !== '__custom'; if (!$('#listenAICustom').hidden) $('#listenAICustom').focus(); });
+$('#listenAI').onclick = () => {
+  let t = $('#listenAITopic').value;
+  if (t === '__custom') { t = $('#listenAICustom').value.trim(); if (!t) { toast('Escribe el tema de la conversación.'); $('#listenAICustom').focus(); return; } }
+  generateDialog(t, $('#listenAI'), 'Generar conversación');
 };
+
+/* ============ Artículos en PDF ============ */
+function articles() { try { return JSON.parse(localStorage.getItem('me_articles') || '[]'); } catch { return []; } }
+function saveArticles(list) { try { localStorage.setItem('me_articles', JSON.stringify(list.slice(0, 30))); } catch { toast('No queda espacio para más artículos. Borra alguno.'); } }
+function articleBrief(a) { return `the article "${a.title_en}". Summary: ${a.summary_en} Key points: ${(a.points || []).join(' | ')}`; }
+function renderArticles() {
+  const list = articles();
+  $('#articleList').innerHTML = list.map(a => `<div class="art" data-id="${a.id}">
+    <div class="art-top"><strong>${esc(a.title_es || a.title_en)}</strong><button class="del" data-del="${a.id}" aria-label="Borrar">×</button></div>
+    <small class="muted">${esc(TOPICS[a.theme]?.icon || '📄')} ${esc(a.title_en)}</small>
+    <details><summary>Resumen y vocabulario</summary><p>${esc(a.summary_es || '')}</p>
+      <p class="small">${(a.vocab || []).map(v => `<b>${esc(v.en)}</b> = ${esc(v.es)}`).join(' · ')}</p></details>
+    <div class="art-acts">
+      <button class="btn small primary" data-listen="${a.id}">🎧 Crear listening</button>
+      <button class="btn small" data-talk="${a.id}">🗣 Conversar</button>
+      <button class="btn small ghost" data-vocab="${a.id}">🃏 Vocabulario</button>
+    </div></div>`).join('');
+  $$('#articleList [data-listen]').forEach(b => b.onclick = () => { const a = articles().find(x => x.id === b.dataset.listen); generateDialog(articleBrief(a), b, '🎧 Crear listening', { article: a.id }); });
+  $$('#articleList [data-talk]').forEach(b => b.onclick = () => startArticleTalk(b.dataset.talk));
+  $$('#articleList [data-vocab]').forEach(b => b.onclick = () => {
+    const a = articles().find(x => x.id === b.dataset.vocab), st = srs(); let n = 0;
+    (a.vocab || []).forEach(v => { if (!st.custom.some(c => c.en === v.en)) { st.custom.push({ en: v.en, es: v.es }); n++; } });
+    persist(); toast(n ? `${n} palabras agregadas a tus tarjetas.` : 'Ese vocabulario ya está en tus tarjetas.');
+  });
+  $$('#articleList [data-del]').forEach(b => b.onclick = () => { if (confirm('¿Borrar este artículo?')) { saveArticles(articles().filter(x => x.id !== b.dataset.del)); renderArticles(); } });
+}
+function startArticleTalk(id) {
+  const a = articles().find(x => x.id === id); if (!a) return;
+  const scId = 'art-' + a.id;
+  if (!SCENARIOS.some(s => s.id === scId)) SCENARIOS.push({ group: '📄 Mis artículos', id: scId, es: 'Artículo: ' + (a.title_es || a.title_en),
+    en: `You and the learner both read ${articleBrief(a)} Talk about the article naturally: ask what they understood, their opinion, how it applies to their own experience, and use its key vocabulary.` });
+  renderScenarios(); $('#scenario').value = scId; $('#customScenario').hidden = true;
+  show('talk'); resetTalk(); $('#scenario').value = scId;
+  toast('Elige un personaje y toca "Empezar conversación".');
+}
+// Al iniciar, agregar los artículos como escenarios de conversación
+articles().forEach(a => SCENARIOS.push({ group: '📄 Mis artículos', id: 'art-' + a.id, es: 'Artículo: ' + (a.title_es || a.title_en),
+  en: `You and the learner both read ${articleBrief(a)} Talk about the article naturally: ask what they understood, their opinion, how it applies to their own experience, and use its key vocabulary.` }));
+renderScenarios();
+$('#pdfInput').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (!S.apiKey) { toast('Para leer artículos necesitas la clave gratuita de Gemini.'); show('settings'); return; }
+  if (f.size > 15 * 1024 * 1024) { toast('El PDF es muy grande (máximo 15 MB). Prueba con un artículo más corto.'); return; }
+  const btn = $('#pdfBtn'), txt = btn.firstChild; const old = txt.textContent; txt.textContent = '📖 Leyendo el artículo… (puede tardar un poco)';
+  btn.classList.add('busy');
+  try {
+    const b64 = await blobToB64(f);
+    const r = await gemini(`You help ${TOPIC.learner} learn English with articles they find interesting.`, [{ role: 'user', parts: [
+      { inlineData: { mimeType: 'application/pdf', data: b64 } },
+      { text: `Read this article (it may be in English or Spanish). Respond ONLY with JSON:
+{"title_en":"short English title","title_es":"short Spanish title","theme":"mill|fire|fit|other (mill = sawmills/wood industry, fire = firefighting/emergencies/rescue/first aid, fit = gym/strength/fitness/nutrition)",
+"summary_en":"summary in clear English for CEFR ${S.level}, 150 to 220 words","summary_es":"summary in Spanish (Chile), 60 to 90 words",
+"points":["5 to 7 key points in English"],"vocab":[{"en":"key English word or expression from the article","es":"Spanish meaning"}]}
+Include 12 to 15 vocab items that are useful to learn.` }
+    ] }], 0.3);
+    if (!r.summary_en) throw new Error('No se pudo leer el artículo.');
+    const a = { id: 'a' + Date.now().toString(36), theme: TOPICS[r.theme] ? r.theme : TOPIC_ID, title_en: r.title_en || f.name, title_es: r.title_es || '',
+      summary_en: r.summary_en, summary_es: r.summary_es || '', points: (r.points || []).slice(0, 8), vocab: (r.vocab || []).filter(v => v.en).slice(0, 16), added: Date.now() };
+    saveArticles([a, ...articles()]);
+    SCENARIOS.push({ group: '📄 Mis artículos', id: 'art-' + a.id, es: 'Artículo: ' + (a.title_es || a.title_en), en: `You and the learner both read ${articleBrief(a)} Talk about the article naturally: ask what they understood, their opinion, how it applies to their own experience, and use its key vocabulary.` });
+    renderScenarios(); renderArticles();
+    toast('Artículo listo. Crea un listening, conversa sobre él o guarda su vocabulario.', 4000);
+  } catch (err) { toast(aiErrorMsg(err), 4500); }
+  finally { txt.textContent = old; btn.classList.remove('busy'); }
+});
 
 /* ============ Usuarios ============ */
 let editingUser = null, pickedColor = 0;
@@ -1401,9 +1543,9 @@ $('#btnSyncNow').onclick = () => {
 $('#btnInvite').onclick = async () => {
   if (!S.teamUrl) { toast('Primero conecta la planilla del equipo.'); return; }
   const link = location.origin + location.pathname + '?equipo=' + encodeURIComponent(S.teamUrl);
-  const text = `Te invito a practicar inglés para el aserradero con Mill English. Abre este enlace en Chrome, instala la app y crea tu usuario: ${link}`;
+  const text = `Te invito a practicar inglés con My English Practice. Abre este enlace en Chrome, instala la app y crea tu usuario: ${link}`;
   try {
-    if (navigator.share) await navigator.share({ title: 'Mill English', text });
+    if (navigator.share) await navigator.share({ title: 'My English Practice', text });
     else { await navigator.clipboard.writeText(text); toast('Invitación copiada. Pégala en WhatsApp o correo.'); }
   } catch {}
 };
@@ -1443,7 +1585,7 @@ function srs() {
   return D.srs;
 }
 function cardSource(key) {
-  if (key.startsWith('w:')) { const w = WORDS.find(x => x[0] === key.slice(2)); return w && { kind: 'Vocabulario del aserradero', front: w[1], back: w[0], say: w[0] }; }
+  if (key.startsWith('w:')) { const w = WORDS.find(x => x[0] === key.slice(2)); return w && { kind: TOPIC.wordsLabel, front: w[1], back: w[0], say: w[0] }; }
   if (key.startsWith('n:')) { const n = D.notes.find(x => x.key === key.slice(2)); return n && { kind: 'Tus errores', front: `Corrige: «${n.original}»`, back: n.corrected, sub: n.sentence || n.explanation, say: n.sentence || n.corrected }; }
   if (key.startsWith('c:')) { const c = srs().custom.find(x => 'c:' + x.en === key); return c && { kind: 'Guardada del tutor', front: c.es, back: c.en, say: c.en }; }
   return null;
@@ -1509,9 +1651,9 @@ $$('#reviewModes button').forEach(b => b.onclick = () => applyReviewMode(b.datas
 let tutorHistory = [];
 function tutorSystem() {
   const u = me();
-  return `You are a friendly, patient English tutor for workers at a sawmill in Chile. ${MILL_CONTEXT}
-The student is ${u.name !== 'Yo' ? u.name : 'a worker'}${u.role ? ', ' + u.role : ''}, CEFR level ${S.level}. They ask questions in Spanish about English: grammar, vocabulary, how to say something at work, pronunciation, or phrases they heard from USNR technicians.
-Answer in simple Chilean Spanish, clear and short (maximum about 120 words). Give 2 or 3 English examples related to the sawmill when useful. If they ask how to say something, give the most natural option first, and a more formal one if relevant. For pronunciation, explain with Spanish-friendly approximations.
+  return `You are a friendly, patient English tutor for ${TOPIC.learner}. ${CONTEXT}
+The student is ${u.name !== 'Yo' ? u.name : 'a worker'}${u.role ? ', ' + u.role : ''}, CEFR level ${S.level}. They ask questions in Spanish about English: grammar, vocabulary, how to say something at work, pronunciation, or phrases they heard or read.
+Answer in simple Chilean Spanish, clear and short (maximum about 120 words). Give 2 or 3 English examples related to this topic when useful. If they ask how to say something, give the most natural option first, and a more formal one if relevant. For pronunciation, explain with Spanish-friendly approximations.
 Respond ONLY with JSON: {"answer_es":"...","examples":[{"en":"...","es":"..."}]}`;
 }
 function tutorAdd(html, cls) {
@@ -1601,6 +1743,18 @@ $('#testStart').onclick = startTest;
 document.addEventListener('click', e => {
   if (e.target.closest('[data-go-test]')) { $('#testIntro').hidden = false; $('#testBody').hidden = true; $('#testResult').hidden = true; show('test'); }
 });
+
+/* ============ Tema de práctica ============ */
+function renderTopicPick() {
+  $('#topicPick').innerHTML = Object.values(TOPICS).map(t => `<button data-t="${t.id}" class="${t.id === TOPIC_ID ? 'on' : ''}"><span>${t.icon}</span>${esc(t.name)}</button>`).join('');
+  $$('#topicPick button').forEach(b => b.onclick = () => {
+    if (b.dataset.t === TOPIC_ID) return;
+    me().topic = b.dataset.t; persist();
+    location.href = location.pathname;          // recarga con el contenido del tema elegido
+  });
+}
+renderTopicPick();
+document.title = 'My English Practice · ' + TOPIC.name;
 
 /* ============ Inicio de la app ============ */
 initSettings();

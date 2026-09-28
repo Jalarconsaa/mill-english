@@ -437,3 +437,23 @@ body[data-view="tutor"] .tutor-btn { background: var(--c-tutor); border-radius: 
 .sum-stats b { font-family: var(--display); font-size: 22px; display: block; }
 .sum-stats small { color: var(--muted); font-size: 12px; }
 .sum-errs { margin-top: 12px; }
+
+/* Temas */
+.topic-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.topic-pick button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; border-radius: var(--radius-m);
+  background: var(--spruce-2); border: 2px solid var(--spruce-3); cursor: pointer; font-weight: 700; font-size: 14px; line-height: 1.2; text-align: center; }
+.topic-pick button span { font-size: 28px; }
+.topic-pick button.on { border-color: var(--c-home); background: color-mix(in srgb, var(--c-home) 16%, var(--spruce-2)); }
+/* Artículos */
+.art-box { margin-bottom: 14px; }
+.art { background: var(--spruce); border-radius: var(--radius-s); padding: 10px 12px; margin-top: 10px; border-left: 4px solid var(--c-listen); }
+.art-top { display: flex; justify-content: space-between; gap: 8px; }
+.art .del { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; }
+.art details { margin: 6px 0; font-size: 15px; }
+.art summary { cursor: pointer; color: var(--info); }
+.art-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.file-btn.busy { opacity: .75; pointer-events: none; }
+/* Dictado */
+#dictEsBtn { margin-top: 10px; }
+.dict-es { margin-top: 6px; padding: 8px 10px; background: var(--spruce); border-radius: var(--radius-s); color: var(--muted); }
+.chip-word { display: inline-block; background: var(--spruce); border: 1px solid var(--spruce-3); border-radius: 999px; padding: 2px 10px; margin: 3px 2px; font-size: 14px; }

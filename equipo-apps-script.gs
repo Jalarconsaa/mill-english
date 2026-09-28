@@ -1,5 +1,5 @@
 /**
- * Mill English · Seguimiento del equipo
+ * My English Practice · Seguimiento del equipo
  * Pega este código en Extensiones → Apps Script de tu planilla de Google Sheets.
  * Luego: Implementar → Nueva implementación → Aplicación web
  *   Ejecutar como: Yo   ·   Quién tiene acceso: Cualquier persona

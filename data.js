@@ -1,5 +1,5 @@
 // Contenido de práctica: funciona sin internet y sin IA.
-const PHRASES = {
+const MILL_PHRASES = {
   seguridad: [
     ["Please put on your hard hat and safety glasses before entering the mill.", "Por favor ponte el casco y los lentes de seguridad antes de entrar al aserradero."],
     ["We need to lock out the machine before we open the guard.", "Tenemos que bloquear la máquina antes de abrir la protección."],
@@ -52,13 +52,13 @@ const PHRASES = {
   ]
 };
 
-const CATEGORY_NAMES = {
+const MILL_CATEGORY_NAMES = {
   seguridad: "Seguridad", mantenimiento: "Mantención", produccion: "Producción",
   fallas: "Fallas", social: "Social", errores: "Mis errores"
 };
 
 // Palabras técnicas para deletreo [inglés, español]
-const WORDS = [
+const MILL_WORDS = [
   ["bearing","rodamiento"],["blade","hoja"],["sawdust","aserrín"],["lumber","madera aserrada"],
   ["kiln","secador (horno)"],["edger","canteador"],["trimmer","despuntadora"],["planer","cepilladora"],
   ["debarker","descortezador"],["conveyor","transportador"],["chipper","chipeador"],["sorter","clasificador"],
@@ -81,7 +81,7 @@ const NATO = {
 const DIGIT_WORDS = ["zero","one","two","three","four","five","six","seven","eight","nine"];
 
 // Nuevas áreas del aserradero y supervisión
-Object.assign(PHRASES, {
+Object.assign(MILL_PHRASES, {
   recepcion: [
     ["The log trucks start arriving at six in the morning.", "Los camiones con rollizos empiezan a llegar a las seis de la mañana."],
     ["We measure the diameter and length of every log.", "Medimos el diámetro y el largo de cada rollizo."],
@@ -168,12 +168,12 @@ Object.assign(PHRASES, {
     ["I will follow up with the maintenance team.", "Voy a hacer seguimiento con el equipo de mantención."]
   ]
 });
-Object.assign(CATEGORY_NAMES, {
+Object.assign(MILL_CATEGORY_NAMES, {
   recepcion: "Recepción de rollizos", descortezador: "Descortezador", resierra: "Resierra",
   trimmer: "Trimmer", buzones: "Buzones", stacker: "Stacker", enzunchado: "Enzunchado",
   antimancha: "Baño antimancha", pintado: "Pintado", supervision: "Supervisión y jefatura"
 });
-WORDS.push(
+MILL_WORDS.push(
   ["bark","corteza"],["rotor","rotor"],["resaw","resierra"],["optimizer","optimizador"],["grader","clasificador"],
   ["bin","buzón"],["gate","compuerta"],["sticker","separador"],["package","paquete"],["layer","capa"],
   ["strap","zuncho"],["coil","rollo"],["label","etiqueta"],["sapstain","mancha azul"],["chemical","químico"],
@@ -184,7 +184,7 @@ WORDS.push(
 );
 
 
-Object.assign(PHRASES, {
+Object.assign(MILL_PHRASES, {
   canteadora: [
     ["The new edger has a BioLuma scanner for grade scanning.", "La canteadora nueva tiene un escáner BioLuma para escanear el grado."],
     ["The scanner measures every board in three dimensions.", "El escáner mide cada tabla en tres dimensiones."],
@@ -206,14 +206,14 @@ Object.assign(PHRASES, {
     ["What is the timeline for the engineering phase?", "¿Cuál es el cronograma de la etapa de ingeniería?"]
   ]
 });
-Object.assign(CATEGORY_NAMES, { canteadora: "Canteadora USNR", proyecto: "Upgrade del aserradero" });
-WORDS.push(["calibration","calibración"],["wane","arista faltante"],["grade","grado"],["infeed","entrada"],["outfeed","salida"],
+Object.assign(MILL_CATEGORY_NAMES, { canteadora: "Canteadora USNR", proyecto: "Upgrade del aserradero" });
+MILL_WORDS.push(["calibration","calibración"],["wane","arista faltante"],["grade","grado"],["infeed","entrada"],["outfeed","salida"],
   ["positioner","posicionador"],["commissioning","puesta en marcha"],["bottleneck","cuello de botella"],["layout","distribución"],
   ["canter","canteador perfilador"],["chips","astillas"],["slab","lampazo"],["capacity","capacidad"],["timeline","cronograma"],
   ["warranty","garantía"],["contractor","contratista"],["permit","permiso"],["throughput","producción por hora"]);
 
 // Escenarios de conversación (group = grupo en el menú)
-const SCENARIOS = [
+const MILL_SCENARIOS = [
   { group:"Proyectos USNR", id:"edger-startup", es:"Puesta en marcha canteadora nueva", en:"The new USNR edger with the BioLuma scanner is starting up this week. Talk with the learner about first problems, board positioning, alarms, operator training and what to check every shift." },
   { group:"Proyectos USNR", id:"bioluma", es:"Scanner BioLuma y optimizador", en:"Explain and discuss the BioLuma scanner and the optimizer with the learner: laser profiles, color vision, defects, wane and grade rules, calibration, cleaning the sensors, remote support." },
   { group:"Proyectos USNR", id:"upgrade", es:"Upgrade del aserradero (2 años)", en:"Discuss the sawmill upgrade planned in about two years: removing the return line, double log infeed, two primary breakdown machines, two chipper canters, going from 28,000 to 45,000 cubic meters. Ask the learner about current problems, bottlenecks and expectations." },
@@ -244,7 +244,7 @@ const SCENARIOS = [
   { group:"Supervisión y jefatura", id:"training", es:"Capacitar a operadores", en:"The learner is a supervisor and asks you to help plan training for the operators on a new machine: topics, schedule, language barriers, checking understanding." }
 ];
 
-const PERSONAS = {
+const MILL_PERSONAS = {
   mattias: { name:"Mattias", es:"Mattias, técnico sueco", en:"Mattias, a friendly Swedish service technician (a man) from USNR, the sawmill machinery supplier. You speak clear international English (it is your second language), calm and precise, sometimes a little direct." },
   joel: { name:"Joel", es:"Joel, técnico sueco", en:"Joel, a young and energetic Swedish service technician (a man) from USNR, specialist in scanners and optimization software. You speak fluent international English with a Swedish touch, practical and friendly." },
   alvaro: { name:"Álvaro", es:"Álvaro, técnico de Canadá (también habla español)", en:"Álvaro, a Canadian service technician (a man) from USNR in British Columbia. You speak natural North American English and you also speak Spanish (your parents are Latin American). You always speak English, but if the learner is clearly lost or writes in Spanish, you may add ONE short clarification in Spanish in parentheses, then continue in English." },

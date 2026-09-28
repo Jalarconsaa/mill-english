@@ -1,5 +1,5 @@
-const CACHE = 'mill-english-v10';
-const SHELL = ['./', './index.html', './styles.css', './data.js', './app.js', './listening.js', './avatars.js',
+const CACHE = 'myenglish-v11';
+const SHELL = ['./', './index.html', './styles.css', './data.js', './app.js', './listening.js', './avatars.js', './topics.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
