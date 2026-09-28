@@ -314,6 +314,24 @@
       <p class="muted small" id="keyStatus"></p>
     </div>
 
+    <h2 class="section-title">Respaldo gratuito: Groq</h2>
+    <div class="card-plain">
+      <p class="muted">Si Gemini llega a su límite o está saturado, la app sigue funcionando con Groq automáticamente. Crea tu clave gratis (sin tarjeta) y pégala aquí.</p>
+      <a class="link" href="https://console.groq.com/keys" target="_blank" rel="noopener">Abrir Groq Console</a>
+      <label>Clave de API de Groq
+        <input id="groqKey" type="password" placeholder="gsk_…" autocomplete="off">
+      </label>
+      <label>Modelo de Groq
+        <div class="composer-row">
+          <select id="groqModel"></select>
+          <button class="btn ghost small" id="btnGroqModels">Buscar modelos de Groq</button>
+        </div>
+      </label>
+      <label class="check"><input type="checkbox" id="groqVoice"> Transcribir mi voz con Groq (ahorra el límite de Gemini)</label>
+      <button class="btn" id="btnGroqTest">Probar Groq</button>
+      <p class="muted small" id="groqStatus"></p>
+    </div>
+
     <h2 class="section-title">Práctica</h2>
     <div class="card-plain">
       <label>Tu nivel

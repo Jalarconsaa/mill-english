@@ -42,3 +42,10 @@ En Listening → "Mis artículos" puedes subir un PDF (idealmente de pocas pági
 
 ## Si el ícono o el nombre no cambian
 Android actualiza el ícono de las apps instaladas por su cuenta y puede tardar hasta un día. Si quieres verlo de inmediato, desinstala el ícono antiguo y vuelve a instalar desde Chrome (tu progreso se mantiene).
+
+## Respaldo gratuito con Groq
+Si Gemini llega a su límite, la app sigue funcionando con Groq:
+1. Entra a https://console.groq.com/keys, crea una cuenta gratis y toca "Create API Key".
+2. En la app: ⚙︎ Ajustes → "Respaldo gratuito: Groq" → pega la clave → "Buscar modelos de Groq" → "Probar Groq".
+3. Deja marcada la opción "Transcribir mi voz con Groq" para ahorrar el límite de Gemini.
+Con Groq funcionan las conversaciones, el tutor, el listening con IA, el dictado con IA y los artículos PDF con texto (los PDF escaneados solo los lee Gemini).

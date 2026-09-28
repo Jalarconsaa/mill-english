@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '13';
+const APP_VERSION = '14';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -13,7 +13,8 @@ function load(key, def) {
 }
 const S = load('me_settings', { apiKey: '', model: 'gemini-3.5-flash-lite', level: 'A2', goal: 20,
   autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.8-flash',
-  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5, micMode: 'record' });
+  voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5, micMode: 'record',
+  groqKey: '', groqModel: 'openai/gpt-oss-120b', groqVoice: true });
 if (!S.voices) S.voices = {};
 // Migrar voces elegidas con los nombres antiguos
 [['lars', 'mattias'], ['mike', 'alvaro'], ['erik', 'paul']].forEach(([o, n]) => { if (S.voices[o] && !S.voices[n]) S.voices[n] = S.voices[o]; delete S.voices[o]; });
@@ -281,19 +282,28 @@ function floatTo16kWav(chunks, inRate) {
   return new Blob([buf], { type: 'audio/wav' });
 }
 const blobToB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); });
-async function transcribeAudio(b64, lang) {
+async function transcribeAudio(b64, lang, blob) {
+  // Con Groq configurado, la voz se transcribe con Whisper y se ahorra el límite de Gemini
+  if (S.groqKey && blob && (S.groqVoice || !S.apiKey)) {
+    try { return await groqTranscribe(blob, lang); }
+    catch (e) { if (!S.apiKey) throw e; }
+  }
+  if (!S.apiKey) throw new Error('NOKEY');
   const spanish = lang.startsWith('es');
   const r = await gemini('You are an accurate speech-to-text engine.', [{ role: 'user', parts: [
     { inlineData: { mimeType: 'audio/wav', data: b64 } },
     { text: `Transcribe exactly what the speaker says. ${spanish ? 'The speaker speaks Spanish (Chile), maybe with some English words.' : 'The speaker is a Chilean learner speaking English (there may be a few Spanish words; keep them).'} Write the words as actually spoken, keeping any grammar mistakes: do NOT correct, improve or complete the sentences. Ignore background machine noise. If nothing intelligible is said, return an empty string. Respond ONLY with JSON: {"text":"..."}` }
-  ] }], 0);
+  ] }], 0).catch(async e => {
+    if (S.groqKey && blob && canFallback(e)) return { text: await groqTranscribe(blob, lang) };
+    throw e;
+  });
   return (r.text || '').trim();
 }
 // Graba hasta que tocas 🎙 otra vez (o hasta el silencio elegido en Ajustes) y luego transcribe
 async function recordVoice({ button, lang = 'en-US', input, onText }) {
   if (recording) { recording.finish(); return; }
-  if (!S.apiKey || !navigator.mediaDevices?.getUserMedia) {
-    if (!S.apiKey) toast('La grabación sin cortes necesita la clave de Gemini. Uso el micrófono del teléfono.');
+  if (!hasAI() || !navigator.mediaDevices?.getUserMedia) {
+    if (!hasAI()) toast('La grabación sin cortes necesita la clave de Gemini o de Groq. Uso el micrófono del teléfono.');
     return listen({ button, lang, onInterim: t => { input.value = t; }, onFinal: onText });
   }
   speechSynthesis.cancel(); stopTalking();
@@ -336,8 +346,8 @@ async function recordVoice({ button, lang = 'en-US', input, onText }) {
     if (Date.now() - started < 800) { input.placeholder = 'Habla o escribe…'; toast('Grabación muy corta. Toca 🎙, habla y vuelve a tocar 🎙 al terminar.'); return; }
     input.placeholder = '✍️ Transcribiendo tu voz…'; button.disabled = true; input.disabled = true;
     try {
-      const b64 = await blobToB64(floatTo16kWav(chunks, rate));
-      const text = await transcribeAudio(b64, lang);
+      const wav = floatTo16kWav(chunks, rate), b64 = await blobToB64(wav);
+      const text = await transcribeAudio(b64, lang, wav);
       if (!text) toast('No logré entender la grabación. Intenta de nuevo.');
       else onText(text);
     } catch (e) { toast(aiErrorMsg(e), 4000); }
@@ -369,10 +379,68 @@ async function callModel(model, system, contents, temperature) {
   return parseJSON(text);
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const hasAI = () => !!(S.apiKey || S.groqKey);
+const hasInline = contents => contents.some(c => (c.parts || []).some(p => p.inlineData));
+// Proveedor de respaldo: Groq (API compatible con OpenAI, plan gratuito)
+async function groqChat(system, contents, temperature = 0.8) {
+  const messages = [{ role: 'system', content: system }].concat(contents.map(c => ({
+    role: c.role === 'model' ? 'assistant' : 'user',
+    content: (c.parts || []).map(p => p.text || '').join('\n')
+  })));
+  const body = { model: S.groqModel || 'openai/gpt-oss-120b', messages, temperature, response_format: { type: 'json_object' } };
+  if (/gpt-oss/.test(body.model)) body.reasoning_effort = 'low';
+  const call = async b => {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.groqKey }, body: JSON.stringify(b) });
+    if (!res.ok) {
+      let detail = ''; try { detail = (await res.json()).error?.message || ''; } catch {}
+      const err = new Error(detail || res.statusText); err.status = res.status; err.provider = 'groq'; throw err;
+    }
+    return res.json();
+  };
+  let data;
+  try { data = await call(body); }
+  catch (e) {
+    // Algunos modelos no aceptan el formato JSON forzado o el esfuerzo de razonamiento: se reintenta sin ellos
+    if (e.status === 400 && /response_format|json|reasoning/i.test(e.message)) { delete body.response_format; delete body.reasoning_effort; data = await call(body); }
+    else throw e;
+  }
+  const text = data.choices?.[0]?.message?.content || '';
+  if (!text) { const err = new Error('Groq no devolvió respuesta.'); err.status = 500; err.provider = 'groq'; throw err; }
+  return parseJSON(text);
+}
+async function groqTranscribe(blob, lang) {
+  const fd = new FormData();
+  fd.append('file', blob, 'voz.wav'); fd.append('model', 'whisper-large-v3-turbo');
+  fd.append('language', lang.startsWith('es') ? 'es' : 'en'); fd.append('response_format', 'json'); fd.append('temperature', '0');
+  const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + S.groqKey }, body: fd });
+  if (!res.ok) { let d = ''; try { d = (await res.json()).error?.message || ''; } catch {} const err = new Error(d || res.statusText); err.status = res.status; err.provider = 'groq'; throw err; }
+  return ((await res.json()).text || '').trim();
+}
+let groqNotified = false, geminiPausedUntil = 0;
+const canFallback = e => [429, 500, 503, 504, 404].includes(e.status);
 let fallbackNotified = '';
 // Prueba el modelo principal; si Google está saturado (503) reintenta y luego usa el modelo de respaldo.
 async function gemini(system, contents, temperature = 0.8) {
-  if (!S.apiKey) throw new Error('NOKEY');
+  if (!S.apiKey) {
+    if (S.groqKey && !hasInline(contents)) return groqChat(system, contents, temperature);
+    throw new Error('NOKEY');
+  }
+  // Si Gemini se agotó hace poco, se va directo a Groq sin perder tiempo
+  if (S.groqKey && !hasInline(contents) && Date.now() < geminiPausedUntil) return groqChat(system, contents, temperature);
+  try { return await geminiOnly(system, contents, temperature); }
+  catch (e) {
+    // Gemini agotado o saturado: se usa Groq si está configurado
+    if (S.groqKey && canFallback(e) && !hasInline(contents)) {
+      if (e.status === 429) geminiPausedUntil = Date.now() + (/per ?day|PerDay|daily/i.test(e.message) ? 60 : 2) * 60000;
+      if (!groqNotified) { groqNotified = true; toast('Gemini llegó a su límite: sigo con Groq (respaldo).', 3500); }
+      try { return await groqChat(system, contents, temperature); }
+      catch (g) { g.geminiError = e; throw g; }
+    }
+    throw e;
+  }
+}
+async function geminiOnly(system, contents, temperature) {
   const chain = [...new Set([S.model, S.backupModel].filter(Boolean))];
   const errs = [];
   for (const model of chain) {
@@ -402,7 +470,15 @@ function parseJSON(text) {
   catch { const m = clean.match(/\{[\s\S]*\}/); if (m) return JSON.parse(m[0]); throw new Error('Respuesta de la IA con formato inválido.'); }
 }
 function aiErrorMsg(e) {
-  if (e.message === 'NOKEY') return 'Primero configura tu clave gratuita de Gemini en Ajustes.';
+  if (e.message === 'NOKEY') return 'Primero configura tu clave gratuita de Gemini (o de Groq) en Ajustes.';
+  if (e.provider === 'groq') {
+    const pre = e.geminiError ? 'Gemini está agotado y el respaldo Groq también falló: ' : 'Groq: ';
+    if (e.status === 401 || e.status === 403) return pre + 'la clave de Groq no es válida. Revísala en Ajustes.';
+    if (e.status === 429) return pre + 'llegaste al límite gratuito. Espera un minuto (o hasta mañana si es el límite diario).';
+    if (e.status === 404 || (e.status === 400 && /model/i.test(e.message))) return pre + 'ese modelo no está disponible. En Ajustes toca "Buscar modelos de Groq".';
+    if (e instanceof TypeError) return 'Sin conexión a internet.';
+    return pre + e.message;
+  }
   if (e.status === 503 || e.status === 500 || e.status === 504) return 'Los servidores de Google están saturados en este momento, incluso el modelo de respaldo. Espera un par de minutos o cambia de modelo en Ajustes.';
   if (e.status === 429) {
     const secs = (String(e.message).match(/retry in ([\d.]+)\s*s/i) || [])[1];
@@ -454,7 +530,7 @@ function updateHome() {
     html += `<div class="day"><div class="bar ${secs >= S.goal * 60 ? 'met' : ''}" style="height:${Math.max(3, pct * 0.8)}%" title="${Math.round(secs / 60)} min"></div>${i === 0 ? 'Hoy' : days[d.getDay()]}</div>`;
   }
   $('#week').innerHTML = html;
-  $('#keyNotice').hidden = !!S.apiKey;
+  $('#keyNotice').hidden = hasAI();
 }
 
 /* Botón de instalación */
@@ -671,7 +747,7 @@ async function talkCall(userText) {
 }
 
 $('#btnStartTalk').addEventListener('click', async () => {
-  if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini.'); show('settings'); return; }
+  if (!hasAI()) { toast('Primero configura tu clave gratuita de Gemini.'); show('settings'); return; }
   talk.history = []; talk.turns = []; talk.started = Date.now(); $('#chat').innerHTML = '';
   $('#talkSetup').hidden = true; $('#composer').hidden = false;
   const sc = currentScenario();
@@ -1153,6 +1229,8 @@ function fillModels(list) {
 }
 function initSettings() {
   $('#apiKey').value = S.apiKey; $('#level').value = S.level; $('#goal').value = String(S.goal);
+  $('#groqKey').value = S.groqKey || ''; $('#groqVoice').checked = S.groqVoice !== false;
+  fillGroqModels(['openai/gpt-oss-120b', 'qwen/qwen3.8-27b']);
   $('#autoSend').checked = S.autoSend; $('#autoSpeak').checked = S.autoSpeak;
   $('#silence').value = String(S.silence ?? 5);
   $('#micMode').value = S.micMode || 'record';
@@ -1162,6 +1240,34 @@ function initSettings() {
   fillModels(['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
 }
 $('#apiKey').addEventListener('change', e => { S.apiKey = e.target.value.trim(); persist(); updateHome(); });
+$('#groqKey').addEventListener('change', e => { S.groqKey = e.target.value.trim(); persist(); updateHome(); });
+$('#groqModel').addEventListener('change', e => { S.groqModel = e.target.value; persist(); });
+$('#groqVoice').addEventListener('change', e => { S.groqVoice = e.target.checked; persist(); });
+function fillGroqModels(list) {
+  const set = new Set(list); set.add(S.groqModel);
+  $('#groqModel').innerHTML = [...set].map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join(''); $('#groqModel').value = S.groqModel;
+}
+$('#btnGroqModels').onclick = async () => {
+  S.groqKey = $('#groqKey').value.trim(); persist();
+  if (!S.groqKey) { toast('Pega tu clave de Groq primero.'); return; }
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: 'Bearer ' + S.groqKey } });
+    if (!res.ok) throw Object.assign(new Error(res.statusText), { status: res.status, provider: 'groq' });
+    const ids = ((await res.json()).data || []).map(m => m.id).filter(id => !/whisper|tts|guard|playai|orpheus|prompt|distil|compound/i.test(id)).sort();
+    if (!ids.length) throw new Error('No se encontraron modelos.');
+    fillGroqModels(ids);
+    if (!ids.includes(S.groqModel)) { S.groqModel = ids.find(i => /gpt-oss-120b/.test(i)) || ids[0]; $('#groqModel').value = S.groqModel; persist(); }
+    toast(`${ids.length} modelos de Groq encontrados.`);
+  } catch (e) { toast(aiErrorMsg(e), 4000); }
+};
+$('#btnGroqTest').onclick = async () => {
+  S.groqKey = $('#groqKey').value.trim(); persist(); updateHome();
+  $('#groqStatus').textContent = 'Probando…';
+  try {
+    const r = await groqChat('Reply only with JSON.', [{ role: 'user', parts: [{ text: 'Return JSON {"ok":true,"msg":"a short friendly greeting for an English learner"}' }] }], 0.5);
+    $('#groqStatus').textContent = '✓ Groq conectado: ' + (r.msg || 'OK');
+  } catch (e) { $('#groqStatus').textContent = aiErrorMsg(e); }
+};
 $('#model').addEventListener('change', e => { S.model = e.target.value; fallbackNotified = ''; persist(); });
 $('#backupModel').addEventListener('change', e => { S.backupModel = e.target.value; persist(); });
 $('#level').addEventListener('change', e => { S.level = e.target.value; persist(); });
@@ -1209,7 +1315,7 @@ $('#btnTestKey').onclick = async () => {
   } catch (e) { $('#keyStatus').textContent = aiErrorMsg(e); }
 };
 $('#btnExport').onclick = () => {
-  const { apiKey, ...rest } = S;
+  const { apiKey, groqKey, ...rest } = S;
   const blob = new Blob([JSON.stringify({ settings: rest, data: D }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `my-english-respaldo-${dayKey()}.json`; a.click();
@@ -1219,7 +1325,7 @@ $('#fileImport').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   try {
     const j = JSON.parse(await f.text());
-    if (j.settings) Object.assign(S, j.settings, { apiKey: S.apiKey });
+    if (j.settings) Object.assign(S, j.settings, { apiKey: S.apiKey, groqKey: S.groqKey });
     if (j.data) { D.stats = j.data.stats || {}; D.notes = j.data.notes || []; }
     persist(); initSettings(); updateHome(); toast('Respaldo importado.');
   } catch { toast('Ese archivo no es un respaldo válido.'); }
@@ -1372,6 +1478,20 @@ $('#listenAI').onclick = () => {
 };
 
 /* ============ Artículos en PDF ============ */
+// Extrae el texto del PDF en el propio teléfono (pdf.js), para usarlo con Groq
+async function pdfText(file) {
+  if (!window.pdfjsLib) {
+    await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; sc.onload = res; sc.onerror = () => rej(new Error('No se pudo cargar el lector de PDF (revisa tu conexión).')); document.head.appendChild(sc); });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  let out = '';
+  for (let i = 1; i <= Math.min(pdf.numPages, 30) && out.length < 14000; i++) {
+    const page = await pdf.getPage(i), tc = await page.getTextContent();
+    out += tc.items.map(it => it.str).join(' ') + '\n';
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
 function articles() { try { return JSON.parse(localStorage.getItem('me_articles') || '[]'); } catch { return []; } }
 function saveArticles(list) { try { localStorage.setItem('me_articles', JSON.stringify(list.slice(0, 30))); } catch { toast('No queda espacio para más artículos. Borra alguno.'); } }
 function articleBrief(a) { return `the article "${a.title_en}". Summary: ${a.summary_en} Key points: ${(a.points || []).join(' | ')}`; }
@@ -1412,21 +1532,30 @@ renderScenarios();
 $('#pdfInput').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  if (!S.apiKey) { toast('Para leer artículos necesitas la clave gratuita de Gemini.'); show('settings'); return; }
+  if (!hasAI()) { toast('Para leer artículos necesitas la clave gratuita de Gemini o de Groq.'); show('settings'); return; }
   if (f.size > 15 * 1024 * 1024) { toast('El PDF es muy grande (máximo 15 MB). Prueba con un artículo más corto.'); return; }
   if (f.size > 4 * 1024 * 1024 && !confirm('Este PDF es grande y podría gastar de una vez el límite gratuito por minuto de la IA. Lo ideal son artículos de hasta 10–15 páginas. ¿Continuar igual?')) return;
   const btn = $('#pdfBtn'), txt = btn.firstChild; const old = txt.textContent; txt.textContent = '📖 Leyendo el artículo… (puede tardar un poco)';
   btn.classList.add('busy');
   try {
-    const b64 = await blobToB64(f);
-    const r = await gemini(`You help ${TOPIC.learner} learn English with articles they find interesting.`, [{ role: 'user', parts: [
-      { inlineData: { mimeType: 'application/pdf', data: b64 } },
-      { text: `Read this article (it may be in English or Spanish). Respond ONLY with JSON:
+    const sysA = `You help ${TOPIC.learner} learn English with articles they find interesting.`;
+    const ask = `Read this article (it may be in English or Spanish). Respond ONLY with JSON:
 {"title_en":"short English title","title_es":"short Spanish title","theme":"mill|fire|fit|other (mill = sawmills/wood industry, fire = firefighting/emergencies/rescue/first aid, fit = gym/strength/fitness/nutrition)",
 "summary_en":"summary in clear English for CEFR ${S.level}, 150 to 220 words","summary_es":"summary in Spanish (Chile), 60 to 90 words",
 "points":["5 to 7 key points in English"],"vocab":[{"en":"key English word or expression from the article","es":"Spanish meaning"}]}
-Include 12 to 15 vocab items that are useful to learn.` }
-    ] }], 0.3);
+Include 12 to 15 vocab items that are useful to learn.`;
+    let r;
+    const viaGroq = async () => {
+      txt.textContent = '📖 Extrayendo el texto del PDF…';
+      const text = await pdfText(f);
+      if (text.length < 200) throw new Error('No encontré texto en el PDF (¿es un escaneo?). Los PDF escaneados solo se pueden leer con Gemini.');
+      txt.textContent = '📖 Leyendo el artículo con Groq…';
+      return groqChat(sysA, [{ role: 'user', parts: [{ text: 'ARTICLE TEXT (may be cut):\n' + text.slice(0, 12000) + '\n\n' + ask }] }], 0.3);
+    };
+    if (S.apiKey) {
+      try { r = await geminiOnly(sysA, [{ role: 'user', parts: [{ inlineData: { mimeType: 'application/pdf', data: await blobToB64(f) } }, { text: ask }] }], 0.3); }
+      catch (e) { if (S.groqKey && canFallback(e)) { toast('Gemini llegó a su límite: leo el artículo con Groq.', 3000); r = await viaGroq(); } else throw e; }
+    } else r = await viaGroq();
     if (!r.summary_en) throw new Error('No se pudo leer el artículo.');
     const a = { id: 'a' + Date.now().toString(36), theme: TOPICS[r.theme] ? r.theme : TOPIC_ID, title_en: r.title_en || f.name, title_es: r.title_es || '',
       summary_en: r.summary_en, summary_es: r.summary_es || '', points: (r.points || []).slice(0, 8), vocab: (r.vocab || []).filter(v => v.en).slice(0, 16), added: Date.now() };
@@ -1670,7 +1799,7 @@ function tutorAdd(html, cls) {
 }
 async function tutorAsk(q) {
   q = (q || '').trim(); if (!q) return;
-  if (!S.apiKey) { toast('Primero configura tu clave gratuita de Gemini en Ajustes.'); show('settings'); return; }
+  if (!hasAI()) { toast('Primero configura tu clave gratuita de Gemini en Ajustes.'); show('settings'); return; }
   $('#tutorInput').value = '';
   tutorAdd(esc(q), 'msg me');
   tutorHistory.push({ role: 'user', parts: [{ text: q }] });
