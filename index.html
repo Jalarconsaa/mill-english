@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=15">
+<link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
 <header class="topbar">
@@ -178,8 +178,9 @@
   <!-- DICTADO -->
   <section class="view" id="view-dict">
     <div class="seg" id="dictModes">
+      <button data-answer="gaps">🧩 Completar</button>
       <button class="on" data-answer="type">⌨ Escribir</button>
-      <button data-answer="voice">🎙 Responder hablando</button>
+      <button data-answer="voice">🎙 Hablar</button>
     </div>
     <div class="chips" id="dictCats"></div>
     <div class="card-plain" id="dictCard">
@@ -187,8 +188,10 @@
       <div class="play-row">
         <button class="play" id="dictPlay">▶ Escuchar</button>
         <button class="btn ghost" id="dictSlow">🐢 Lento</button>
+        <button class="btn ghost" id="dictParts">✂️ Por partes</button>
       </div>
-      <div class="composer-row">
+      <div class="gaps-line" id="dictGaps" hidden></div>
+      <div class="composer-row" id="dictInputRow">
         <input id="dictInput" type="text" placeholder="Escribe lo que escuchas" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
         <button class="mic" id="dictMic" aria-label="Repetir en voz alta" hidden>🎙</button>
       </div>
@@ -448,11 +451,11 @@
 <div class="lesson-banner" id="lessonBanner" hidden></div>
 <div class="toast" id="toast" role="status"></div>
 
-<script src="data.js?v=15"></script>
-<script src="listening.js?v=15"></script>
-<script src="avatars.js?v=15"></script>
-<script src="topics.js?v=15"></script>
-<script src="app.js?v=15"></script>
-<script src="course.js?v=15"></script>
+<script src="data.js?v=16"></script>
+<script src="listening.js?v=16"></script>
+<script src="avatars.js?v=16"></script>
+<script src="topics.js?v=16"></script>
+<script src="app.js?v=16"></script>
+<script src="course.js?v=16"></script>
 </body>
 </html>

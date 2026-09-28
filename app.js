@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '15';
+const APP_VERSION = '16';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -887,15 +887,37 @@ function loadDict(cat) {
   } else if (cat === 'ia') dict.items = dict.aiItems.slice();
   else {
     let pool = PHRASES[cat];
-    if (S.level === 'A1') { const short = pool.filter(([en]) => en.split(' ').length <= 8); if (short.length >= 4) pool = short; }
+    const maxW = { A1: 6, A2: 8 }[S.level];
+    if (maxW) { const short = pool.filter(([en]) => en.split(' ').length <= maxW); if (short.length >= 4) pool = short; else pool = pool.slice().sort((a, b) => a[0].split(' ').length - b[0].split(' ').length).slice(0, Math.max(4, short.length)); }
     dict.items = shuffle(pool).slice(0, 8).map(([en, es]) => ({ en, es }));
   }
   dict.idx = 0; dict.total = 0; dict.results = []; renderDictCats(); showDictItem();
   $('#dictCard').hidden = false; $('#dictSummary').hidden = true;
 }
+const STOP = new Set('a an the is are am was were be to of in on at for and or but it this that i you he she we they my your his her our their do does did not no yes with from by as so if'.split(' '));
+// Elige qué palabras se ocultan (las más importantes de la frase)
+function pickGaps(en) {
+  const words = en.split(/\s+/);
+  const cand = words.map((w, i) => [i, w.replace(/[^A-Za-z']/g, '')]).filter(([, w]) => w.length >= 3 && !STOP.has(w.toLowerCase()));
+  const n = Math.max(1, Math.min(cand.length, { A1: 1, A2: 2, B1: 3 }[S.level] || Math.ceil(words.length / 4)));
+  return shuffle(cand).slice(0, n).map(([i]) => i).sort((a, b) => a - b);
+}
+function renderGaps() {
+  const it = curDict(); if (!it) return;
+  if (!it.gaps) it.gaps = pickGaps(it.en);
+  const words = it.en.split(/\s+/);
+  $('#dictGaps').innerHTML = words.map((w, i) => {
+    if (!it.gaps.includes(i)) return `<span class="gw">${esc(w)}</span>`;
+    const core = w.replace(/[^A-Za-z0-9']/g, ''), tail = w.slice(w.indexOf(core) + core.length);
+    return `<input class="gap" data-i="${i}" size="${Math.max(3, core.length)}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Palabra que falta">${esc(tail)}`;
+  }).join(' ');
+  const gaps = $$('#dictGaps .gap');
+  gaps.forEach((g, k) => g.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); if (gaps[k + 1]) gaps[k + 1].focus(); else checkDict(); } }));
+}
 function showDictItem() {
   dict.checked = false; dict.scored = false;
   $('#dictInput').value = ''; $('#dictResult').innerHTML = '';
+  if (S.dictAnswer === 'gaps') renderGaps();
   $('#dictCount').textContent = `${dict.idx + 1} / ${dict.items.length}`;
   $('#dictScore').textContent = dict.idx ? `Promedio ${Math.round(dict.total / dict.idx * 100)}%` : '';
   $('#dictNext').textContent = 'Saltar';
@@ -909,11 +931,26 @@ $('#dictEsBtn').onclick = () => {
   if (!e.hidden && curDict()) curDict().usedEs = true;
 };
 const curDict = () => dict.items[dict.idx];
-$('#dictPlay').onclick = () => curDict() && speak(curDict().en);
-$('#dictSlow').onclick = () => curDict() && speak(curDict().en, 0.65);
+// Principiantes escuchan más lento
+const dictRate = () => Math.min(S.rate, { A1: 0.72, A2: 0.82 }[S.level] || S.rate);
+// Divide la frase en partes cortas (por comas y cada 3-5 palabras)
+function chunkSentence(t) {
+  const size = { A1: 3, A2: 4, B1: 5 }[S.level] || 6, out = [];
+  t.split(/(?<=[,;:])\s+/).forEach(part => {
+    const w = part.split(/\s+/).filter(Boolean);
+    for (let i = 0; i < w.length; i += size) out.push(w.slice(i, i + size).join(' '));
+  });
+  // Evita un pedacito final de una sola palabra
+  if (out.length > 1 && out[out.length - 1].split(' ').length === 1) out[out.length - 2] += ' ' + out.pop();
+  return out;
+}
+$('#dictPlay').onclick = () => curDict() && speak(curDict().en, dictRate());
+$('#dictSlow').onclick = () => curDict() && speak(curDict().en, Math.min(0.62, dictRate()));
+$('#dictParts').onclick = () => curDict() && speakSequence(chunkSentence(curDict().en), Math.min(0.75, dictRate()), 900);
 function checkDict() {
   if (!curDict()) return loadDict(dict.cat);
   if (dict.checked) return nextDict();
+  if (S.dictAnswer === 'gaps') return checkGaps();
   const voice = S.dictAnswer === 'voice';
   const typed = $('#dictInput').value.trim();
   if (!typed) { toast(voice ? 'Escucha la frase, toca 🎙 y repítela.' : 'Escucha y escribe la frase primero.'); return; }
@@ -935,9 +972,31 @@ function checkDict() {
       : { original: o.b, corrected: o.a, explanation: 'Escuchaste mal o escribiste mal esta palabra.', type: 'spelling', sentence: it.en, source: 'Dictado' }));
   $('#dictNext').textContent = dict.idx + 1 < dict.items.length ? 'Siguiente' : 'Terminar';
 }
+function checkGaps() {
+  const it = curDict(), inputs = $$('#dictGaps .gap');
+  if (inputs.every(g => !g.value.trim())) { toast('Escucha la frase y escribe las palabras que faltan.'); return; }
+  const words = it.en.split(/\s+/), clean = w => w.toLowerCase().replace(/[’]/g, "'").replace(/[^a-z0-9']/g, '');
+  let good = 0; const wrong = [];
+  inputs.forEach(g => {
+    const target = words[+g.dataset.i], ok = clean(g.value) === clean(target);
+    if (ok) good++; else { wrong.push(target.replace(/[^A-Za-z0-9']/g, '')); if (g.value.trim().length > 1) addNote({ original: g.value.trim(), corrected: target.replace(/[^A-Za-z0-9']/g, ''), explanation: 'Palabra del dictado.', type: 'spelling', sentence: it.en, source: 'Dictado' }); }
+    g.classList.add(ok ? 'ok' : 'bad'); g.readOnly = true;
+    if (!ok) g.insertAdjacentHTML('afterend', `<span class="gfix">${esc(target.replace(/[^A-Za-z0-9']/g, ''))}</span>`);
+  });
+  const score = good / inputs.length;
+  dict.checked = true;
+  if (!dict.scored) {
+    dict.scored = true; dict.total += score; bump('dict');
+    dict.results.push({ en: it.en, es: it.es, score, usedEs: !!it.usedEs, wrong });
+  }
+  const pct = Math.round(score * 100);
+  $('#dictResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 50 ? 'var(--hivis)' : 'var(--bad)'}">${pct === 100 ? '¡Perfecto!' : `${good} de ${inputs.length} palabras`}</div>
+    <p class="muted small">Frase completa: ${esc(it.en)}</p>`;
+  $('#dictNext').textContent = dict.idx + 1 < dict.items.length ? 'Siguiente' : 'Terminar';
+}
 function nextDict() {
   if (dict.idx + 1 >= dict.items.length) { showDictSummary(); return; }
-  dict.idx++; showDictItem(); speak(curDict().en);
+  dict.idx++; showDictItem(); speak(curDict().en, dictRate());
 }
 $('#dictCheck').onclick = checkDict;
 // Resultado final de la ronda de dictado
@@ -969,18 +1028,21 @@ function showDictSummary() {
       <button class="btn primary" id="dictAgain">Nueva ronda</button>
     </div></div>`;
   const rt = $('#dictRetry');
-  if (rt) rt.onclick = () => { dict.items = failed.map(x => ({ en: x.en, es: x.es })); dict.idx = 0; dict.total = 0; dict.results = []; $('#dictCard').hidden = false; $('#dictSummary').hidden = true; showDictItem(); speak(curDict().en); };
+  if (rt) rt.onclick = () => { dict.items = failed.map(x => ({ en: x.en, es: x.es })); dict.idx = 0; dict.total = 0; dict.results = []; $('#dictCard').hidden = false; $('#dictSummary').hidden = true; showDictItem(); speak(curDict().en, dictRate()); };
   $('#dictAgain').onclick = () => loadDict(dict.cat);
 }
 function applyDictMode() {
-  const voice = S.dictAnswer === 'voice';
+  const voice = S.dictAnswer === 'voice', gaps = S.dictAnswer === 'gaps';
+  $('#dictInputRow').hidden = gaps; $('#dictGaps').hidden = !gaps;
   $$('#dictModes button').forEach(b => b.classList.toggle('on', b.dataset.answer === S.dictAnswer));
   $('#dictMic').hidden = !voice;
   $('#dictInput').readOnly = voice;
   $('#dictInput').placeholder = voice ? 'Toca 🎙 y repite la frase' : 'Escribe lo que escuchas';
   $('#dictCheck').hidden = voice;
 }
-$$('#dictModes button').forEach(b => b.onclick = () => { S.dictAnswer = b.dataset.answer; persist(); applyDictMode(); if (dict.items.length) showDictItem(); });
+// Principiantes empiezan con "Completar", salvo que hayan elegido otro modo
+if (['A1', 'A2'].includes(S.level) && !S.dictModeChosen) S.dictAnswer = 'gaps';
+$$('#dictModes button').forEach(b => b.onclick = () => { S.dictAnswer = b.dataset.answer; S.dictModeChosen = true; persist(); applyDictMode(); if (dict.items.length) showDictItem(); });
 $('#dictMic').onclick = () => listen({ button: $('#dictMic'),
   onInterim: t => { $('#dictInput').value = t; },
   onFinal: t => { $('#dictInput').value = t; dict.checked = false; checkDict(); } });
@@ -998,7 +1060,7 @@ $('#dictAI').onclick = async () => {
   try {
     const r = await gemini(
       `You create listening dictation exercises for ${TOPIC.learner} learning English (CEFR ${S.level}). ${CONTEXT}`,
-      [{ role: 'user', parts: [{ text: `Create 8 different sentences (6 to 14 words) that people in this context would really say. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
+      [{ role: 'user', parts: [{ text: `Create 8 different sentences (${ { A1: '3 to 6', A2: '5 to 8', B1: '7 to 12' }[S.level] || '8 to 16' } words, simple for level ${S.level}) that people in this context would really say. Topic: ${topic}. Natural spoken English, level ${S.level}. Write numbers in digits. ${weak ? 'Try to include some of these words the learner got wrong before: ' + weak + '.' : ''} Respond ONLY with JSON: {"items":[{"en":"...","es":"Spanish (Chile) translation"}]}` }] }], 1);
     dict.aiItems = (r.items || []).filter(x => x.en);
     if (!dict.aiItems.length) throw new Error('No llegaron frases.');
     loadDict('ia'); toast('Frases nuevas listas. Toca ▶ Escuchar.');

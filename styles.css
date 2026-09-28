@@ -526,3 +526,20 @@ body.has-banner main { padding-top: 70px; }
 #reviewModes button { font-size: 14px; padding: 9px 2px; }
 /* Controles de la radio siempre visibles al desplazarse */
 .radio-bar { position: sticky; top: 0; z-index: 5; box-shadow: 0 4px 12px rgba(0,0,0,.35); background: #2E3350; }
+
+/* Dictado: completar huecos y botones por partes */
+#dictModes { grid-template-columns: repeat(3, 1fr); }
+#dictModes button { font-size: 14px; padding: 9px 2px; }
+.play-row { flex-wrap: wrap; }
+.play-row .play { flex: 1 1 100%; }
+.play-row .btn { flex: 1; }
+.gaps-line { font-size: 21px; line-height: 2.2; margin: 6px 0 4px; }
+.gaps-line .gap { width: auto; font-size: 19px; padding: 2px 6px; margin: 0 2px; background: var(--spruce); border: none; border-bottom: 3px solid var(--accent);
+  border-radius: 4px 4px 0 0; color: var(--sawdust); text-align: center; }
+.gaps-line .gap.ok { border-bottom-color: var(--ok); color: var(--ok); }
+.gaps-line .gap.bad { border-bottom-color: var(--bad); color: var(--bad); text-decoration: line-through; }
+.gaps-line .gfix { color: var(--ok); font-weight: 700; margin-left: 4px; font-size: 17px; }
+
+.st-advice { margin: -2px 0 8px; font-size: 13.5px; color: var(--c-home); background: color-mix(in srgb, var(--c-home) 10%, transparent); border-radius: var(--radius-s); padding: 5px 8px; }
+
+.lb-advice { display: block; color: var(--c-home); margin-top: 2px; }

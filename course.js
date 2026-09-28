@@ -230,7 +230,8 @@ function buildCourse() {
 function cp() { D.course = D.course || {}; return (D.course[TOPIC_ID] = D.course[TOPIC_ID] || { l: {}, skip: -1 }); }
 const lessonId = idx => `${TOPIC_ID}:${Math.floor(idx / 4)}:${LESSON_TYPES[idx % 4].t}`;
 const isDone = idx => !!(cp().l[lessonId(idx)] || {}).done;
-const isOpen = idx => idx === 0 || isDone(idx - 1) || idx <= cp().skip;
+const isOpen = () => true;                                         // todas las lecciones quedan abiertas
+const prevStageDone = stageIdx => stageIdx === 0 || LESSON_TYPES.every((_, k) => isDone((stageIdx - 1) * 4 + k));
 function nextLessonIdx() {
   const total = COURSE.length * 4;
   for (let i = 0; i < total; i++) if (!isDone(i) && isOpen(i)) return i;
@@ -241,7 +242,7 @@ function renderPath() {
   if (!COURSE) COURSE = buildCourse();
   const total = COURSE.length * 4, done = Array.from({ length: total }, (_, i) => isDone(i)).filter(Boolean).length;
   const next = nextLessonIdx();
-  const myLvl = LEVEL_ORDER.indexOf(S.level), canSkip = cp().skip < 0 && done === 0 && COURSE.some(s => LEVEL_ORDER.indexOf(s.level) < myLvl);
+  const myLvl = LEVEL_ORDER.indexOf(S.level), canSkip = false;
   let html = `<h2 class="section-title">Tu camino · ${esc(TOPIC.name)}</h2>
     <div class="path-head">
       <span class="xp-chip">⭐ ${D.xp || 0} XP</span>
@@ -256,14 +257,16 @@ function renderPath() {
   let lastLevel = '';
   COURSE.forEach(st => {
     if (st.level !== lastLevel) { lastLevel = st.level; html += `<div class="level-head">Nivel ${esc(st.level)} · ${esc(LEVEL_NAMES[st.level] || '')}</div>`; }
-    const base = st.i * 4, stageOpen = isOpen(base);
+    const base = st.i * 4, stageOpen = true, started = LESSON_TYPES.some((_, k) => isDone(base + k));
+    const advise = !prevStageDone(st.i) && !started;
     const stars = LESSON_TYPES.reduce((a, _, k) => a + ((cp().l[lessonId(base + k)] || {}).stars || 0), 0);
     const stageDone = LESSON_TYPES.every((_, k) => isDone(base + k));
     html += `<div class="stage-card ${stageOpen ? '' : 'locked'} ${stageDone ? 'done' : ''}">
-      <div class="st-head"><b>${stageOpen ? '' : '🔒 '}Etapa ${st.i + 1}: ${esc(st.name)}</b><span class="st-stars">★ ${stars}/12</span></div>
+      <div class="st-head"><b>Etapa ${st.i + 1}: ${esc(st.name)}</b><span class="st-stars">★ ${stars}/12</span></div>
+      ${advise ? `<p class="st-advice">💡 Te recomendamos terminar primero la Etapa ${st.i}.</p>` : ''}
       <div class="st-lessons">${LESSON_TYPES.map((lt, k) => {
         const idx = base + k, rec = cp().l[lessonId(idx)] || {};
-        const state = rec.done ? 'done' : isOpen(idx) ? 'open' : 'locked';
+        const state = rec.done ? 'done' : 'open';
         return `<button class="lesson ${state} ${idx === next ? 'next' : ''}" data-lesson="${idx}" ${state === 'locked' ? 'aria-disabled="true"' : ''}>
           <span class="l-ic">${state === 'locked' ? '🔒' : lt.icon}</span><span class="l-nm">${lt.name}</span>
           <span class="l-st">${rec.done ? starsTxt(rec.stars || 0) : state === 'open' ? 'Disponible' : ''}</span></button>`;
@@ -272,8 +275,8 @@ function renderPath() {
   $('#pathBox').innerHTML = html;
   $$('#pathBox [data-lesson]').forEach(b => b.onclick = () => {
     const idx = +b.dataset.lesson;
-    if (!isOpen(idx)) { toast('Completa la lección anterior para desbloquear esta.'); return; }
-    startLesson(idx);
+    const sIdx = Math.floor(idx / 4);
+    startLesson(idx, !prevStageDone(sIdx) && !LESSON_TYPES.some((_, k) => isDone(sIdx * 4 + k)));
   });
   const sk = $('#pathSkip');
   if (sk) sk.onclick = () => {
@@ -297,11 +300,11 @@ function lessonBanner(html) {
   if (!html) { b.hidden = true; b.innerHTML = ''; document.body.classList.remove('has-banner'); return; }
   b.innerHTML = html; b.hidden = false; document.body.classList.add('has-banner');
 }
-function startLesson(idx) {
+function startLesson(idx, advise = false) {
   const st = COURSE[Math.floor(idx / 4)], lt = LESSON_TYPES[idx % 4];
   lessonCtx = { idx, id: lessonId(idx), type: lt.t, st };
   const label = `${lt.icon} Lección: ${lt.name} · Etapa ${st.i + 1}`;
-  lessonBanner(`<span>${esc(label)}</span><button class="btn ghost small" id="lbExit">Salir</button>`);
+  lessonBanner(`<span>${esc(label)}${advise ? `<small class="lb-advice">💡 Consejo: termina antes la Etapa ${st.i} para avanzar en orden. Igual puedes practicar esta.</small>` : ''}</span><button class="btn ghost small" id="lbExit">Salir</button>`);
   $('#lbExit').onclick = backToPath;
   if (lt.t === 'vocab') {
     startQuiz({ title: `Etapa ${st.i + 1} · Vocabulario`, words: st.words,
@@ -309,7 +312,7 @@ function startLesson(idx) {
   } else if (lt.t === 'dict') {
     show('dict'); loadDict(st.cat);
     dict.items = dict.items.slice(0, 6); dict.idx = 0; dict.results = []; showDictItem();
-    toast('Escucha cada frase y escríbela (o repítela). Aprueba con 70%.', 3500);
+    toast(S.dictAnswer === 'gaps' ? 'Escucha cada frase y escribe las palabras que faltan. Aprueba con 70%.' : 'Escucha cada frase y escríbela (o repítela). Aprueba con 70%.', 3500);
   } else if (lt.t === 'listen') {
     stopRadio(true); show('listen'); openDialog(st.dialog);
     toast('Escucha la conversación y responde las 3 preguntas. Aprueba con 2 de 3.', 3500);
@@ -352,7 +355,7 @@ function lessonHook(type, score, meta = {}) {
   lessonBanner(`<span>✓ ${starsTxt(stars)} · +${gain} XP${stageDone && first && ctx.idx % 4 === 3 ? ' · 🎉 ¡Etapa completada!' : ''}</span>
     <button class="btn small primary" id="lbBack">Volver al camino</button>`);
   $('#lbBack').onclick = backToPath;
-  if (stageDone && first && ctx.idx % 4 === 3 && COURSE[stageIdx + 1]) toast(`🎉 Desbloqueaste la Etapa ${stageIdx + 2}: ${COURSE[stageIdx + 1].name}`, 4000);
+  if (stageDone && first && COURSE[stageIdx + 1]) toast(`🎉 ¡Etapa ${stageIdx + 1} completada! Sigue con la Etapa ${stageIdx + 2}: ${COURSE[stageIdx + 1].name}`, 4000);
 }
 
 /* ---------- Escucha continua (modo radio, sin preguntas) ---------- */
