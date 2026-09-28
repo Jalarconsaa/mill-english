@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '12';
+const APP_VERSION = '13';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1777,7 +1777,32 @@ updateHome();
     toast('Te uniste al seguimiento del equipo. Crea tu usuario con tu nombre.', 4500);
     show('users'); if (me().name === 'Yo') openUserForm(me().id);
   } else if (q.get('v') === 'users') show('users');
+  if (q.get('u')) setTimeout(() => toast('App actualizada a la versión ' + APP_VERSION), 600);
   if (q.toString()) history.replaceState(null, '', location.pathname);
 })();
 renderDictCats();
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+// Actualizaciones: busca versión nueva cada vez que se abre la app y recarga una vez cuando llega
+if ('serviceWorker' in navigator) {
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller, openedAt = Date.now();
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;                  // primera instalación: no hace falta recargar
+    if (Date.now() - openedAt < 15000) { reloaded = true; location.reload(); return; }
+    // Si ya estás practicando, no se interrumpe: se avisa y actualizas cuando quieras
+    const t = $('#toast'); t.textContent = '🔄 Hay una versión nueva. Toca aquí para actualizar.';
+    t.classList.add('show', 'clickable'); clearTimeout(toastTimer);
+    t.onclick = () => { reloaded = true; location.reload(); };
+  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then(reg => { reg.update(); document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); }); })
+    .catch(() => {}));
+}
+// Botón "Buscar actualización": borra solo los archivos guardados de la app (no tu progreso ni tu clave)
+$('#btnUpdate').onclick = async () => {
+  $('#btnUpdate').textContent = 'Buscando…';
+  try {
+    if ('caches' in window) for (const k of await caches.keys()) await caches.delete(k);
+    if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  } catch {}
+  location.href = location.pathname + '?u=' + Date.now();
+};
