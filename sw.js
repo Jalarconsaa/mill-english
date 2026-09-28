@@ -1,5 +1,5 @@
-const CACHE = 'myenglish-v14';
-const SHELL = ['./', './index.html', './styles.css', './data.js', './app.js', './listening.js', './avatars.js', './topics.js',
+const CACHE = 'myenglish-v15';
+const SHELL = ['./', './index.html', './styles.css?v=15', './data.js?v=15', './listening.js?v=15', './avatars.js?v=15', './topics.js?v=15', './app.js?v=15', './course.js?v=15',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {

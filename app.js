@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -93,7 +93,7 @@ function show(view) {
   $$('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
   $('#main').scrollTop = 0;
   if (view === 'home') updateHome();
-  if (view === 'notes') applyReviewMode($('#notesPanel').hidden ? 'cards' : 'notes');
+  if (view === 'notes') applyReviewMode(!$('#notesPanel').hidden ? 'notes' : !$('#vocabPanel').hidden ? 'vocab' : 'cards');
   if (view === 'dict' && !dict.items.length) loadDict(dict.cat);
   if (view === 'spell' && !spell.target) newSpell();
   if (view === 'listen') { renderListenList(); renderArticles(); }
@@ -531,6 +531,7 @@ function updateHome() {
   }
   $('#week').innerHTML = html;
   $('#keyNotice').hidden = hasAI();
+  if (typeof renderPath === 'function') renderPath();
 }
 
 /* Botón de instalación */
@@ -767,6 +768,7 @@ function showTalkSummary() {
   const t = talk.turns || [];
   if (!t.length) { resetTalk(); return; }
   const ok = t.filter(x => x.perfect).length, pct = Math.round(ok / t.length * 100);
+  if (typeof lessonHook === 'function') setTimeout(() => lessonHook('talk', pct / 100, { turns: t.length }), 50);
   const avg = (t.reduce((a, x) => a + x.score, 0) / t.length).toFixed(1);
   const mins = Math.max(1, Math.round((Date.now() - (talk.started || Date.now())) / 60000));
   const errs = t.flatMap(x => x.cs).slice(0, 8);
@@ -944,6 +946,7 @@ function showDictSummary() {
   const r = dict.results || [], n = r.length;
   if (!n) { loadDict(dict.cat); return; }
   const avg = Math.round(r.reduce((a, x) => a + x.score, 0) / n * 100);
+  if (typeof lessonHook === 'function') setTimeout(() => lessonHook('dict', avg / 100), 50);
   const perfect = r.filter(x => x.score === 1).length, withEs = r.filter(x => x.usedEs).length;
   const words = [...new Set(r.flatMap(x => x.wrong))].slice(0, 14);
   const color = avg >= 85 ? 'var(--ok)' : avg >= 60 ? 'var(--c-home)' : 'var(--bad)';
@@ -1403,6 +1406,7 @@ function answerQ(qi, oi, box) {
     const first = D.listened[lst.dlg.id] === undefined;
     D.listened[lst.dlg.id] = Math.max(pct, D.listened[lst.dlg.id] || 0);
     if (first || !todayStats().listen) bump('listen'); else persist();
+    if (typeof lessonHook === 'function') lessonHook('listen', pct / 100);
     $('#lpResult').innerHTML = `<div class="verdict" style="color:${pct === 100 ? 'var(--ok)' : pct >= 60 ? 'var(--c-home)' : 'var(--bad)'}">${good} de ${n} correctas</div>
       <p class="muted">${pct === 100 ? '¡Excelente comprensión!' : 'Escucha otra vez con el texto visible para ver lo que se te escapó.'}</p>`;
   }
@@ -1416,7 +1420,7 @@ async function playLines(from, to, rate) {
   const sameVoice = voiceFor(roles.A)?.name === voiceFor(roles.B)?.name;
   $('#lpPlay').textContent = '■ Detener'; $('#lpStage').classList.add('playing');
   for (let i = from; i <= to; i++) {
-    if (token !== playToken) return;
+    if (token !== playToken) return false;
     $$('#lpLines .tline').forEach(el => el.classList.toggle('now', +el.dataset.i === i));
     if (from !== to) $(`#lpLines .tline[data-i="${i}"]`)?.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
     const [sp, en] = d.lines[i];
@@ -1426,6 +1430,7 @@ async function playLines(from, to, rate) {
     await wait(350);
   }
   if (token === playToken) { $$('#lpLines .tline').forEach(el => el.classList.remove('now')); $$('#lpStage .actor').forEach(el => el.classList.remove('now')); $('#lpStage').classList.remove('playing'); $('#lpPlay').textContent = '▶ Escuchar conversación'; }
+  return token === playToken;
 }
 function speakAs(text, rate, role, pitchOverride) {
   return new Promise(res => {
@@ -1652,7 +1657,7 @@ function syncPayload() {
   const u = me(), st = todayStats(), total = Object.values(D.stats).reduce((a, x) => a + (x.secs || 0), 0);
   return { user_id: u.id, name: u.name, role: u.role || '', level: S.level, date: dayKey(),
     minutes: Math.round(st.secs / 60), dict: st.dict, spell: st.spell, talk: st.talk, listen: st.listen || 0,
-    notes: D.notes.length, cards: st.cards || 0, streak: streak(), totalMinutes: Math.round(total / 60) };
+    notes: D.notes.length, cards: st.cards || 0, xp: D.xp || 0, streak: streak(), totalMinutes: Math.round(total / 60) };
 }
 function syncNow(beacon = false) {
   if (!S.teamUrl || me().name === 'Yo') return false;
@@ -1694,7 +1699,8 @@ $('#btnTeamPanel').onclick = async () => {
     const since = new Date(); since.setDate(since.getDate() - 6); const sinceKey = dayKey(since);
     const byUser = {};
     rows.forEach(r => {
-      const u = byUser[r.id] || (byUser[r.id] = { name: r.usuario, role: r.cargo, level: r.nivel, week: 0, today: 0, streak: 0, last: '' });
+      const u = byUser[r.id] || (byUser[r.id] = { name: r.usuario, role: r.cargo, level: r.nivel, week: 0, today: 0, streak: 0, last: '', xp: 0 });
+      u.xp = Math.max(u.xp, +r.xp || 0);
       if (r.fecha >= sinceKey) u.week += +r.minutos || 0;
       if (r.fecha === dayKey()) u.today = +r.minutos || 0;
       if (r.fecha >= u.last) { u.last = r.fecha; u.streak = +r.racha || 0; u.name = r.usuario; u.role = r.cargo; u.level = r.nivel; }
@@ -1704,7 +1710,7 @@ $('#btnTeamPanel').onclick = async () => {
     const max = Math.max(...list.map(u => u.week), 1);
     box.innerHTML = `<p class="muted small">Minutos de práctica en los últimos 7 días</p>` + list.map(u => `<div class="team-row">
       <div class="top"><strong>${esc(u.name)}</strong><span>${u.week} min</span></div>
-      <small>${esc(u.role || '')} · ${esc(u.level || '')} · Hoy ${u.today} min · Racha ${u.streak} · Último día ${esc(u.last)}</small>
+      <small>${esc(u.role || '')} · ${esc(u.level || '')} · ⭐ ${u.xp} XP · Hoy ${u.today} min · Racha ${u.streak} · Último día ${esc(u.last)}</small>
       <div class="bar"><div style="width:${Math.round(u.week / max * 100)}%"></div></div></div>`).join('');
   } catch {
     box.innerHTML = '<p class="muted">No se pudo leer el panel desde la app. Puedes ver el avance directamente en la planilla de Google Sheets.</p>';
@@ -1721,7 +1727,7 @@ function srs() {
   return D.srs;
 }
 function cardSource(key) {
-  if (key.startsWith('w:')) { const w = WORDS.find(x => x[0] === key.slice(2)); return w && { kind: TOPIC.wordsLabel, front: w[1], back: w[0], say: w[0] }; }
+  if (key.startsWith('w:')) { const w = allWords().find(x => x[0] === key.slice(2)); return w && { kind: TOPIC.wordsLabel, front: w[1], back: w[0], say: w[0] }; }
   if (key.startsWith('n:')) { const n = D.notes.find(x => x.key === key.slice(2)); return n && { kind: 'Tus errores', front: `Corrige: «${n.original}»`, back: n.corrected, sub: n.sentence || n.explanation, say: n.sentence || n.corrected }; }
   if (key.startsWith('c:')) { const c = srs().custom.find(x => 'c:' + x.en === key); return c && { kind: 'Guardada del tutor', front: c.es, back: c.en, say: c.en }; }
   return null;
@@ -1734,7 +1740,7 @@ function buildReviewQueue() {
   const candidates = [
     ...D.notes.slice().sort((a, b) => b.count - a.count).map(n => 'n:' + n.key),
     ...st.custom.map(c => 'c:' + c.en),
-    ...WORDS.map(w => 'w:' + w[0])
+    ...allWords().map(w => 'w:' + w[0])
   ].filter(k => !st.cards[k]);
   rq = shuffle(due).concat(candidates.slice(0, allowNew));
 }
@@ -1777,7 +1783,8 @@ $$('#fcGrade button').forEach(b => b.onclick = () => {
 });
 function applyReviewMode(mode) {
   $$('#reviewModes button').forEach(b => b.classList.toggle('on', b.dataset.rv === mode));
-  $('#cardsPanel').hidden = mode !== 'cards'; $('#notesPanel').hidden = mode !== 'notes';
+  $('#cardsPanel').hidden = mode !== 'cards'; $('#notesPanel').hidden = mode !== 'notes'; $('#vocabPanel').hidden = mode !== 'vocab';
+  if (mode === 'vocab') { renderVocab(); return; }
   if (mode === 'cards') { buildReviewQueue(); showCard(); }
   else { renderNotes(); if (D.notes.length && !todayStats().notes) bump('notes'); }
 }

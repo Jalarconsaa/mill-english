@@ -49,3 +49,9 @@ Si Gemini llega a su límite, la app sigue funcionando con Groq:
 2. En la app: ⚙︎ Ajustes → "Respaldo gratuito: Groq" → pega la clave → "Buscar modelos de Groq" → "Probar Groq".
 3. Deja marcada la opción "Transcribir mi voz con Groq" para ahorrar el límite de Gemini.
 Con Groq funcionan las conversaciones, el tutor, el listening con IA, el dictado con IA y los artículos PDF con texto (los PDF escaneados solo los lee Gemini).
+
+## Tu camino (curso por etapas)
+En Inicio aparece "Tu camino": etapas ordenadas por nivel (A2 → C1). Cada etapa tiene 4 lecciones (Vocabulario, Dictado, Listening y Conversación) que se desbloquean una tras otra. Aprobar da estrellas y XP. Si ya tienes buen nivel, usa "Desbloquear hasta mi nivel".
+
+## Escuchar sin parar
+En Listening, "📻 Escuchar sin parar" reproduce las conversaciones una tras otra, sin preguntas, con pausa, siguiente y modo lento. La pantalla se mantiene encendida mientras escuchas.
