@@ -1,4 +1,4 @@
-const CACHE = 'myenglish-v11';
+const CACHE = 'myenglish-v12';
 const SHELL = ['./', './index.html', './styles.css', './data.js', './app.js', './listening.js', './avatars.js', './topics.js',
   './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 

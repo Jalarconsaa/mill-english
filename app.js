@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '11';
+const APP_VERSION = '12';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -11,8 +11,8 @@ function load(key, def) {
   try { const v = localStorage.getItem(key); return v ? Object.assign(structuredClone(def), JSON.parse(v)) : structuredClone(def); }
   catch { return structuredClone(def); }
 }
-const S = load('me_settings', { apiKey: '', model: 'gemini-2.5-flash', level: 'A2', goal: 20,
-  autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.5-flash-lite',
+const S = load('me_settings', { apiKey: '', model: 'gemini-3.5-flash-lite', level: 'A2', goal: 20,
+  autoSend: true, autoSpeak: true, rate: 0.95, backupModel: 'gemini-3.8-flash',
   voices: { mattias: '', joel: '', alvaro: '', paul: '', local: '', narrator: '' }, pitch: 0.85, dictAnswer: 'type', spellAnswer: 'type', teamUrl: '', silence: 5, micMode: 'record' });
 if (!S.voices) S.voices = {};
 // Migrar voces elegidas con los nombres antiguos
@@ -373,8 +373,8 @@ let fallbackNotified = '';
 // Prueba el modelo principal; si Google está saturado (503) reintenta y luego usa el modelo de respaldo.
 async function gemini(system, contents, temperature = 0.8) {
   if (!S.apiKey) throw new Error('NOKEY');
-  const chain = [...new Set([S.model, S.backupModel, 'gemini-2.5-flash'].filter(Boolean))];
-  let lastErr;
+  const chain = [...new Set([S.model, S.backupModel].filter(Boolean))];
+  const errs = [];
   for (const model of chain) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -385,14 +385,16 @@ async function gemini(system, contents, temperature = 0.8) {
         }
         return r;
       } catch (e) {
-        lastErr = e;
+        errs.push(e);
         if (e.status === 503 || e.status === 500 || e.status === 504) { if (attempt === 0) { await wait(1500); continue; } break; }
         if (e.status === 429 || e.status === 404) break;   // probar el siguiente modelo
         throw e;                                            // clave inválida, sin internet, etc.
       }
     }
   }
-  throw lastErr;
+  // Se informa el error más importante: límite gratuito > saturación > otros > modelo inexistente
+  const rank = e => e.status === 429 ? 0 : [500, 503, 504].includes(e.status) ? 1 : e.status === 404 ? 3 : 2;
+  throw errs.sort((a, b) => rank(a) - rank(b))[0];
 }
 function parseJSON(text) {
   const clean = text.replace(/```json|```/g, '').trim();
@@ -402,10 +404,14 @@ function parseJSON(text) {
 function aiErrorMsg(e) {
   if (e.message === 'NOKEY') return 'Primero configura tu clave gratuita de Gemini en Ajustes.';
   if (e.status === 503 || e.status === 500 || e.status === 504) return 'Los servidores de Google están saturados en este momento, incluso el modelo de respaldo. Espera un par de minutos o cambia de modelo en Ajustes.';
-  if (e.status === 429) return 'Llegaste al límite gratuito por minuto o por día. Espera un momento y reintenta.';
+  if (e.status === 429) {
+    const secs = (String(e.message).match(/retry in ([\d.]+)\s*s/i) || [])[1];
+    if (/per ?day|PerDay|daily/i.test(e.message)) return 'Se agotó el límite gratuito de HOY. Se renueva cada día alrededor de las 3 o 4 de la mañana (hora de Chile). Mientras tanto puedes usar dictado, deletreo, tarjetas y listening ya creados.';
+    return `Llegaste al límite gratuito por minuto. Espera ${secs ? Math.ceil(+secs) + ' segundos' : 'un minuto'} y vuelve a intentar.`;
+  }
   if (e.status === 400 && /api key/i.test(e.message)) return 'La clave no es válida. Revísala en Ajustes.';
   if (e.status === 403) return 'La clave no tiene permiso. Crea una nueva en Google AI Studio.';
-  if (e.status === 404) return 'El modelo no existe. En Ajustes toca "Buscar modelos" y elige otro.';
+  if (e.status === 404) return 'Ese modelo no está disponible para tu clave. En Ajustes toca "Buscar modelos" y elige uno de la lista.';
   if (e instanceof TypeError) return 'Sin conexión a internet.';
   return 'Error de la IA: ' + e.message;
 }
@@ -1153,7 +1159,7 @@ function initSettings() {
   $('#appVersion').textContent = 'My English Practice · versión ' + APP_VERSION;
   $('#rate').value = S.rate; $('#rateVal').textContent = S.rate + 'x';
   $('#pitch').value = S.pitch; $('#pitchVal').textContent = S.pitch;
-  fillModels(['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
+  fillModels(['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
 }
 $('#apiKey').addEventListener('change', e => { S.apiKey = e.target.value.trim(); persist(); updateHome(); });
 $('#model').addEventListener('change', e => { S.model = e.target.value; fallbackNotified = ''; persist(); });
@@ -1408,6 +1414,7 @@ $('#pdfInput').addEventListener('change', async e => {
   if (!f) return;
   if (!S.apiKey) { toast('Para leer artículos necesitas la clave gratuita de Gemini.'); show('settings'); return; }
   if (f.size > 15 * 1024 * 1024) { toast('El PDF es muy grande (máximo 15 MB). Prueba con un artículo más corto.'); return; }
+  if (f.size > 4 * 1024 * 1024 && !confirm('Este PDF es grande y podría gastar de una vez el límite gratuito por minuto de la IA. Lo ideal son artículos de hasta 10–15 páginas. ¿Continuar igual?')) return;
   const btn = $('#pdfBtn'), txt = btn.firstChild; const old = txt.textContent; txt.textContent = '📖 Leyendo el artículo… (puede tardar un poco)';
   btn.classList.add('busy');
   try {
