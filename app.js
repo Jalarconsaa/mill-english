@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '16';
+const APP_VERSION = '17';
 /* ============ Utilidades y almacenamiento ============ */
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -531,6 +531,10 @@ function updateHome() {
   }
   $('#week').innerHTML = html;
   $('#keyNotice').hidden = hasAI();
+  const hasProgress = (D.xp || 0) > 0 || D.notes.length > 0 || hasAI();
+  const bkDays = S.lastBackup ? (Date.now() - S.lastBackup) / 86400000 : 999;
+  $('#backupNotice').hidden = !(hasProgress && bkDays > 7);
+  if (!$('#backupNotice').hidden) $('#backupNoticeText').textContent = S.lastBackup ? `Tu último respaldo fue hace ${Math.floor(bkDays)} días.` : 'Aún no has guardado un respaldo.';
   if (typeof renderPath === 'function') renderPath();
 }
 
@@ -1379,23 +1383,60 @@ $('#btnTestKey').onclick = async () => {
     $('#keyStatus').textContent = '✓ Conexión correcta: ' + (r.msg || 'OK');
   } catch (e) { $('#keyStatus').textContent = aiErrorMsg(e); }
 };
-$('#btnExport').onclick = () => {
-  const { apiKey, groqKey, ...rest } = S;
-  const blob = new Blob([JSON.stringify({ settings: rest, data: D }, null, 1)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `my-english-respaldo-${dayKey()}.json`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-};
-$('#fileImport').addEventListener('change', async e => {
-  const f = e.target.files[0]; if (!f) return;
+/* ---------- Respaldo completo: configuración, claves, voces, usuarios, progreso, artículos ---------- */
+function backupData(withKeys) {
+  const all = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('me_')) all[k] = localStorage.getItem(k);
+  }
+  if (!withKeys && all.me_settings) {
+    try { const st = JSON.parse(all.me_settings); delete st.apiKey; delete st.groqKey; all.me_settings = JSON.stringify(st); } catch {}
+  }
+  return { app: 'my-english-practice', version: APP_VERSION, date: new Date().toISOString(), withKeys: !!withKeys, storage: all };
+}
+async function saveBackup() {
+  const withKeys = $('#backupKeys').checked;
+  S.lastBackup = Date.now(); persist();
+  const file = new File([JSON.stringify(backupData(withKeys))], `my-english-respaldo-${dayKey()}.json`, { type: 'application/json' });
+  // En Android se abre el menú Compartir: puedes guardarlo en Google Drive, enviártelo por WhatsApp o correo
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Respaldo My English Practice', text: 'Respaldo de My English Practice' });
+      toast('Respaldo listo. Guárdalo en Google Drive o envíatelo a ti mismo.'); updateHome(); return;
+    }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  toast('Respaldo descargado en la carpeta Descargas. Cópialo a Google Drive para no perderlo.', 4500); updateHome();
+}
+$('#btnExport').onclick = saveBackup;
+async function restoreBackup(f) {
   try {
     const j = JSON.parse(await f.text());
-    if (j.settings) Object.assign(S, j.settings, { apiKey: S.apiKey, groqKey: S.groqKey });
-    if (j.data) { D.stats = j.data.stats || {}; D.notes = j.data.notes || []; }
-    persist(); initSettings(); updateHome(); toast('Respaldo importado.');
-  } catch { toast('Ese archivo no es un respaldo válido.'); }
-  e.target.value = '';
-});
+    if (j.storage) {
+      const hadKeys = { apiKey: S.apiKey, groqKey: S.groqKey };
+      Object.entries(j.storage).forEach(([k, v]) => { if (k.startsWith('me_')) localStorage.setItem(k, v); });
+      // Si el respaldo no traía claves, se conservan las que ya tenías
+      if (!j.withKeys) {
+        const st = JSON.parse(localStorage.getItem('me_settings') || '{}');
+        if (!st.apiKey && hadKeys.apiKey) st.apiKey = hadKeys.apiKey;
+        if (!st.groqKey && hadKeys.groqKey) st.groqKey = hadKeys.groqKey;
+        localStorage.setItem('me_settings', JSON.stringify(st));
+      }
+    } else if (j.settings || j.data) {
+      // Respaldos antiguos (versiones anteriores)
+      Object.assign(S, j.settings || {}, { apiKey: S.apiKey || (j.settings || {}).apiKey || '', groqKey: S.groqKey });
+      if (j.data) Object.assign(D, j.data);
+      persist();
+    } else throw new Error('formato');
+    toast('Respaldo restaurado. Recargando…');
+    setTimeout(() => location.reload(), 900);
+  } catch { toast('Ese archivo no es un respaldo válido de My English Practice.'); }
+}
+['fileImport', 'fileImport2'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) restoreBackup(f); }); });
+// Pide al navegador que no borre los datos por falta de espacio
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(ok => { S.persisted = ok; }).catch(() => {});
 $('#btnReset').onclick = () => {
   if (!confirm('¿Borrar todo tu progreso y errores guardados? La clave se mantiene.')) return;
   D.stats = {}; D.notes = []; persist(); updateHome(); toast('Progreso borrado.');

@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=16">
+<link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
 <header class="topbar">
@@ -56,8 +56,15 @@
     <div class="week" id="week"></div>
 
     <div class="notice" id="keyNotice" hidden>
-      <p>Para conversar con el técnico virtual necesitas una clave gratuita de Google Gemini. El dictado y el deletreo funcionan sin clave.</p>
-      <button class="btn" data-open-settings>Configurar clave</button>
+      <p>Para conversar con los personajes necesitas una clave gratuita de Google Gemini. El dictado y el deletreo funcionan sin clave.</p>
+      <div class="row-btns">
+        <button class="btn" data-open-settings>Configurar clave</button>
+        <label class="btn ghost file-btn">📥 Tengo un respaldo<input type="file" id="fileImport2" accept="application/json,.json" hidden></label>
+      </div>
+    </div>
+    <div class="notice" id="backupNotice" hidden>
+      <p><strong>💾 Guarda un respaldo.</strong> <span id="backupNoticeText"></span> Si borras los datos de Chrome, con el respaldo recuperas todo en un minuto.</p>
+      <button class="btn" data-open-settings>Ir a respaldos</button>
     </div>
   </section>
 
@@ -428,9 +435,12 @@
     <h2 class="section-title">Tus datos</h2>
     <div class="card-plain">
       <div class="row-btns">
-        <button class="btn ghost" id="btnExport">Exportar respaldo</button>
-        <label class="btn ghost file-btn">Importar respaldo<input type="file" id="fileImport" accept="application/json" hidden></label>
+        <button class="btn primary" id="btnExport">💾 Guardar respaldo</button>
+        <label class="btn ghost file-btn">📥 Restaurar respaldo<input type="file" id="fileImport" accept="application/json,.json" hidden></label>
       </div>
+      <label class="check"><input type="checkbox" id="backupKeys" checked> Incluir mis claves de Gemini y Groq en el respaldo</label>
+      <p class="muted small">El respaldo guarda todo: claves, voces, ajustes, usuarios, progreso, tarjetas, artículos y conversaciones creadas. Guárdalo en Google Drive. Como puede incluir tus claves, no lo compartas con nadie.</p>
+      <p class="muted small">💡 Al borrar el historial de Chrome, desmarca <b>"Cookies y datos de sitios"</b>: así la app no pierde nada.</p>
       <button class="btn danger" id="btnReset">Borrar todo el progreso</button>
     </div>
     <button class="btn wide" id="btnCloseSettings">Volver</button>
@@ -451,11 +461,11 @@
 <div class="lesson-banner" id="lessonBanner" hidden></div>
 <div class="toast" id="toast" role="status"></div>
 
-<script src="data.js?v=16"></script>
-<script src="listening.js?v=16"></script>
-<script src="avatars.js?v=16"></script>
-<script src="topics.js?v=16"></script>
-<script src="app.js?v=16"></script>
-<script src="course.js?v=16"></script>
+<script src="data.js?v=17"></script>
+<script src="listening.js?v=17"></script>
+<script src="avatars.js?v=17"></script>
+<script src="topics.js?v=17"></script>
+<script src="app.js?v=17"></script>
+<script src="course.js?v=17"></script>
 </body>
 </html>

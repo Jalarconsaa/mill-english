@@ -55,3 +55,10 @@ En Inicio aparece "Tu camino": etapas ordenadas por nivel (A2 → C1). Cada etap
 
 ## Escuchar sin parar
 En Listening, "📻 Escuchar sin parar" reproduce las conversaciones una tras otra, sin preguntas, con pausa, siguiente y modo lento. La pantalla se mantiene encendida mientras escuchas.
+
+## Que no se pierdan tus datos
+La app guarda todo en Chrome. Si borras "Cookies y datos de sitios" o desinstalas la app, se borra. Para protegerte:
+1. Al borrar el historial de Chrome, marca solo "Historial de navegación" y desmarca "Cookies y datos de sitios".
+2. Guarda un respaldo: ⚙︎ Ajustes → "💾 Guardar respaldo" → elige Google Drive (o envíatelo por WhatsApp o correo).
+3. Si algún día se borra todo: en Inicio toca "📥 Tengo un respaldo" (o Ajustes → "Restaurar respaldo") y elige el archivo. Vuelven las claves, voces, usuarios y progreso.
+La app te recuerda guardar un respaldo cada semana.
